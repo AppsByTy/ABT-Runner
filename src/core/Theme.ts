@@ -36,7 +36,7 @@ export const STAGES: readonly StageDef[] = [
   { id: 4, name: 'CORRUPTED SYSTEM', at: 1750, primary: '#ff2a4a', secondary: '#ff7a1a', void: '#140306', corrupt: 0.5, glitch: 0.04, bugShare: 0.45, goodBugChance: 0.28, ambient: 0.7, strobe: 0.25 },
   { id: 5, name: 'VIRUS INFECTION', at: 2550, primary: '#39ff6a', secondary: '#ff2255', void: '#010604', corrupt: 0.66, glitch: 0.05, bugShare: 0.55, goodBugChance: 0.26, ambient: 0.45, strobe: 0 },
   { id: 6, name: 'CRITICAL SYSTEM FAILURE', at: 3450, primary: '#ff1e3c', secondary: '#ffb020', void: '#120104', corrupt: 0.85, glitch: 0.07, bugShare: 0.6, goodBugChance: 0.24, ambient: 0.6, strobe: 0.6 },
-  { id: 7, name: 'THE CORE', at: 4450, primary: '#35d8ff', secondary: '#ffd23a', void: '#050d1c', corrupt: 0.08, glitch: 0.02, bugShare: 0.55, goodBugChance: 0.3, ambient: 1.1, strobe: 0 },
+  { id: 7, name: 'THE CORE', at: 4450, primary: '#35d8ff', secondary: '#ffd23a', void: '#050d1c', corrupt: 0.08, glitch: 0.02, bugShare: 0.55, goodBugChance: 0.3, ambient: 0.75, strobe: 0 },
 ];
 
 export function stageAt(distance: number): StageDef {
@@ -69,15 +69,19 @@ const tmpC = new THREE.Color();
 const DEBUG_GREEN = new THREE.Color('#39ff6a');
 
 /** Smoothly moves THEME toward a stage (and debug/admin overrides). */
+const DEBUG_VIOLET = new THREE.Color('#6a7cff');
+const DEBUG_VOID = new THREE.Color('#030818');
+
 export function updateTheme(stage: StageDef, dt: number, time: number, dist: number, debug: number, extraGlitch: number): void {
   const k = damp(1.4, dt);
   tmpA.set(stage.primary);
   tmpB.set(stage.secondary);
   tmpC.set(stage.void);
   if (debug > 0) {
-    tmpA.lerp(DEBUG_GREEN, debug);
-    tmpB.lerp(DEBUG_GREEN, debug * 0.6);
-    tmpC.lerp(new THREE.Color('#010d05'), debug);
+    // Debug: green code on a blue/violet machine - contrast instead of a flat green wash.
+    tmpA.lerp(DEBUG_GREEN, debug * 0.85);
+    tmpB.lerp(DEBUG_VIOLET, debug * 0.8);
+    tmpC.lerp(DEBUG_VOID, debug);
   }
   const kd = debug > 0 ? damp(6, dt) : k;
   THEME.uPrimary.value.lerp(tmpA, kd);

@@ -1,4 +1,5 @@
 import './style.css';
+import './ui/premium.css';
 import { GameManager } from './core/GameManager';
 import { events } from './core/EventBus';
 

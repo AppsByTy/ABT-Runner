@@ -601,10 +601,10 @@ export class ComputerWorld {
           // Die with engraved circuit blocks.
           vec2 dp = fract(p * 9.0);
           float blocks = step(0.12, dp.x) * step(0.12, dp.y) * step(0.35, hash12(floor(p * 9.0)));
-          c += die * mix(uPrimary, vec3(1.0), 0.15 + 0.3 * uCore) * (0.25 + blocks * 0.35 + pul * 0.15 + uCore * 0.5);
+          c += die * mix(uPrimary, vec3(1.0), 0.15 + 0.3 * uCore) * (0.25 + blocks * 0.35 + pul * 0.15 + uCore * 0.22);
           c += pins * uSecondary * 0.7;
           c += ray * uPrimary * smoothstep(0.1, 0.0, abs(pulse - 0.5)) * exp(-length(p) * 1.4) * 1.4;
-          float glow = exp(-max(box - s, 0.0) * 5.0) * (1.0 - chip) * (0.14 + 0.35 * uCore);
+          float glow = exp(-max(box - s, 0.0) * 5.0) * (1.0 - chip) * (0.14 + 0.18 * uCore);
           c += uPrimary * glow;
           float a = clamp(chip + pins + glow + ray * 0.5, 0.0, 1.0);
           gl_FragColor = vec4(c, a);

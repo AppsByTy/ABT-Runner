@@ -8,7 +8,8 @@ export default defineConfig({
   build: {
     target: 'es2020',
     outDir: 'dist',
-    assetsInlineLimit: 0,
+    // Inline the bundled fonts (single-file / offline builds); keep music files external.
+    assetsInlineLimit: (file: string) => /\.woff2?$/.test(file),
     chunkSizeWarningLimit: 1200,
   },
 });

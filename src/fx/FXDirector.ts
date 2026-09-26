@@ -133,7 +133,7 @@ export class FXDirector {
             float a = position.x + uTime * (1.2 + mod(aCell, 3.0) * 0.4);
             vec3 p = vec3(cos(a) * position.z, position.y + sin(uTime * 2.0 + aCell) * 0.1, sin(a) * position.z);
             vec4 mv = modelViewMatrix * vec4(p, 1.0);
-            gl_PointSize = uScale * 0.3 / -mv.z;
+            gl_PointSize = uScale * 0.17 / -mv.z;
             gl_Position = projectionMatrix * mv;
           }`,
         fragmentShader: /* glsl */ `
@@ -269,6 +269,8 @@ export class FXDirector {
       post.flashScreen(c, type === 'admin' || type === 'debug' ? 0.45 : 0.25);
       post.glitch(type === 'debug' ? 0.8 : 0.3);
       cam.kickFov(type === 'boost' ? 8 : 4);
+      if (type === 'debug' || type === 'admin') cam.cinematic('power', 1.1);
+      if (type === 'debug' || type === 'admin') cam.cinematic('power', 1.1);
       if (type === 'boost') this.speedLines.boost(1);
     });
     events.on('stage', () => {
@@ -276,6 +278,7 @@ export class FXDirector {
       post.flashScreen(THEME.uPrimary.value.getStyle(), 0.2);
     });
     events.on('bossStart', () => {
+      cam.cinematic('boss', 2.2);
       post.glitch(1.0);
       post.flashScreen(RED, 0.3);
       cam.shake(0.5);
@@ -316,6 +319,30 @@ export class FXDirector {
     mesh.userData.size = size;
     this.scene.add(mesh);
     this.bursts.push({ mesh, t: 0, life: 0.5, z, kind: 'ring' });
+  }
+
+  private beatGlow = 0;
+
+  /** Music beat hook: environment + particles react in DEBUG and at high combo. */
+  onBeat(kind: 'kick' | 'snare', mode: PowerType | null, running: boolean, multiplier: number): void {
+    if (!running) return;
+    const pl = this.player;
+    this.beatGlow = kind === 'kick' ? 1 : 0.6;
+    if (mode === 'debug' && kind === 'kick') {
+      this.ring(pl.x, 0.04, -0.5, GREEN, 2.4);
+      for (let i = 0; i < 10; i++) {
+        const a = (i / 10) * Math.PI * 2;
+        this.particles.burst(pl.x + Math.cos(a) * 0.9, 0.08, Math.sin(a) * 0.9, {
+          count: 1, color: [GREEN, '#caffd8'], speed: [2.5, 3.5], dir: [Math.cos(a), 0.9, Math.sin(a)], spread: 0.1, life: [0.4, 0.6], size: [0.12, 0.16], world: false, drag: 2, shape: Shape.Glyph,
+        });
+      }
+    }
+    if (multiplier >= 5 && kind === 'snare') {
+      const c = multiplier >= 10 ? GOLD : MAGENTA;
+      for (const side of [-1, 1]) {
+        this.particles.burst(side * 4.3, 0.4, -14, { count: 6, color: [c, '#ffffff'], speed: [3, 6], dir: [-side * 0.2, 1, 0.3], spread: 0.3, life: [0.3, 0.5], size: [0.1, 0.16], gravity: 6, shape: [Shape.Spark, Shape.Streak] });
+      }
+    }
   }
 
   /** Particles burst out, then snap together into a green checkmark. */
@@ -426,12 +453,12 @@ export class FXDirector {
 
     // DEBUG MODE: code glyphs stream up around the runner.
     if (running && mode === 'debug') {
-      this.debugEmit += dt * 26;
+      this.debugEmit += dt * 11;
       while (this.debugEmit >= 1) {
         this.debugEmit -= 1;
         const a = Math.random() * Math.PI * 2;
         this.particles.burst(pl.x + Math.cos(a) * 1.1, 0.1 + Math.random() * 0.4, Math.sin(a) * 1.1, {
-          count: 1, color: [GREEN, '#b8ffcc', CYAN], speed: [1.2, 2.4], dir: [0, 1, 0], spread: 0.15, life: [0.7, 1.1], size: [0.13, 0.19], world: false, shape: Shape.Glyph,
+          count: 1, color: [GREEN, '#b8ffcc', CYAN], speed: [1.2, 2.4], dir: [0, 1, 0], spread: 0.15, life: [0.7, 1.1], size: [0.07, 0.11], world: false, shape: Shape.Glyph,
         });
       }
     }
@@ -476,6 +503,7 @@ export class FXDirector {
 
     this.underglow.position.set(pl.x, 0.25 + pl.y, 0.9);
     this.underglow.color.set(mode ? POWER_INFO[mode].color : '#00e5ff');
-    this.underglow.intensity = pl.dead ? 0.8 : mode ? 4 : 2.2;
+    this.beatGlow = Math.max(0, this.beatGlow - dt * 5);
+    this.underglow.intensity = (pl.dead ? 0.8 : mode ? 4 : 2.2) + this.beatGlow * 1.6;
   }
 }

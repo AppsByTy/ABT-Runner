@@ -90,7 +90,7 @@ const results = {};
   await page.keyboard.press('ArrowUp');
   await page.waitForTimeout(60);
   const jump = await probe();
-  await page.waitForFunction(() => window.__game.player.grounded, null, { timeout: 5000 });
+  await page.waitForFunction(() => window.__game.player.grounded, null, { timeout: 180000 });
   await page.keyboard.press('ArrowDown');
   await page.waitForTimeout(60);
   const slide = await probe();

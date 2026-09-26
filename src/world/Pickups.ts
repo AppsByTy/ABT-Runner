@@ -24,6 +24,7 @@ export interface Pickup {
   dist: number;
   collected: boolean;
   popT: number;
+  lockAhead?: number;
   phase: number;
   /** Being pulled toward the player by a magnet. */
   mag: boolean;
@@ -472,6 +473,9 @@ export class PickupManager {
       const c = a[i];
       const ahead = c.dist - distance;
       if (c.collected) {
+        // Pop in the player's frame (don't let the world scroll it into the camera).
+        if (c.popT === 0) c.lockAhead = Math.max(0.2, Math.min(1.5, ahead));
+        c.dist = distance + (c.lockAhead ?? 0.5);
         c.popT += dt;
         if (c.popT >= 0.2) this.releaseAt(i);
         continue;
@@ -517,8 +521,8 @@ export class PickupManager {
       let rotY = t * 2.2;
       if (c.collected) {
         const k = c.popT / 0.2;
-        scale = k < 0.4 ? 1 + k * 1.5 : Math.max(0.01, 1.6 * (1 - (k - 0.4) / 0.6));
-        y += k * 1.3;
+        scale = k < 0.4 ? 1 + k * 0.6 : Math.max(0.01, 1.24 * (1 - (k - 0.4) / 0.6));
+        y += k * 0.9;
         rotY += k * 10;
       }
       if (c.kind === 'power') {

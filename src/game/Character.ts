@@ -41,7 +41,7 @@ const JOINTS: readonly JointName[] = [
 
 const C = {
   skin: 0x6a3a22,
-  hoodie: 0xa8f01a,
+  hoodie: 0x96dc14,
   hoodieDeep: 0x7fbf10,
   pants: 0x121216,
   pocket: 0x1b1b22,
@@ -273,7 +273,7 @@ export class Character {
     const m = {
       skin: phys({ color: C.skin, roughness: 0.52, sheen: 0.4, sheenColor: new THREE.Color(0xffb08a), sheenRoughness: 0.6, clearcoat: 0.08 }, C.magenta, 0.25),
       hoodie: phys({
-        color: C.hoodie, roughness: 0.82, sheen: 1, sheenColor: new THREE.Color(0xe8ff9a), sheenRoughness: 0.45,
+        color: C.hoodie, roughness: 0.84, sheen: 0.6, sheenColor: new THREE.Color(0xd8ff8a), sheenRoughness: 0.45,
         normalMap: fabricN, normalScale: new THREE.Vector2(0.5, 0.5), emissive: 0x3a6a00, emissiveIntensity: 0.18,
       }, C.magenta, 0.35),
       rib: phys({ color: C.hoodieDeep, roughness: 0.85, sheen: 0.8, sheenColor: new THREE.Color(0xd8ff80), normalMap: ribN, normalScale: new THREE.Vector2(0.8, 0.8) }, C.magenta, 0.2),

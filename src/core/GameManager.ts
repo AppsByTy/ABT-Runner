@@ -22,7 +22,7 @@ import { FXDirector } from '../fx/FXDirector';
 import { HUD } from '../ui/HUD';
 import { audio } from '../audio/AudioManager';
 import { clamp, makeAABB, overlapX, overlapZ, overlaps } from '../utils/math';
-import { QUALITY, loadQuality, lower, saveQuality, type QualitySettings } from '../render/Quality';
+import { QUALITY, loadQuality, type QualitySettings } from '../render/Quality';
 import { MaterialLib } from '../render/MaterialLib';
 import { EnvironmentMaps } from '../render/Environment';
 import { PlanarReflection } from '../render/Reflection';
@@ -248,7 +248,11 @@ export class GameManager {
     this.resetRun();
     this.hud.setState(this.state, this.best);
     audio.startMusic();
+    audio.onBeat = (kind) => this.fx.onBeat(kind, this.powers.mode, this.state === GameState.Playing, this.multiplier);
     audio.setIntensity(0);
+    // Pre-compile every shader (incl. pooled, not-yet-visible hazards, bosses
+    // and power-ups) during the menu so nothing hitches mid-run.
+    void this.renderer.compileAsync(this.scene, this.cam.camera).catch(() => {});
   }
 
   private setViewportSizes(): void {
@@ -350,7 +354,8 @@ export class GameManager {
     this.stateTime = 0;
     this.hud.setState(next, this.best);
     events.emit('stateChange', { from, to: next });
-    audio.setMuffled(next === GameState.Paused || next === GameState.GameOver);
+    audio.setMuffled(next === GameState.Paused);
+    audio.setGameOver(next === GameState.Dying || next === GameState.GameOver);
     return true;
   }
 
@@ -533,6 +538,11 @@ export class GameManager {
     this.debugBlend += ((this.powers.has('debug') ? 1 : 0) - this.debugBlend) * Math.min(1, realDt * 5);
     const lowHp = this.health < 40 && (playing || dying) ? (40 - this.health) / 40 : 0;
     updateTheme(this.stage, realDt, this.clock, this.distance, this.debugBlend, lowHp * 0.15);
+    // Beat sync: world lighting, road dividers, bloom and UI pulse with the music.
+    const beat = audio.update(realDt);
+    const beatGain = playing ? 0.55 + Math.min(0.45, (this.multiplier - 1) * 0.06) + this.debugBlend * 0.5 : 0.45;
+    THEME.uBeat.value = beat * beatGain;
+    this.hud.setBeat(THEME.uBeat.value);
     this.links.apply();
     (this.scene.fog as THREE.Fog).color.copy(THEME.uVoid.value);
     this.hemi.color.copy(THEME.uPrimary.value).lerp(this.white, 0.55);
@@ -546,6 +556,9 @@ export class GameManager {
     const charColor = mode === 'debug' || mode === 'admin' || mode === 'boost' || mode === 'ram' ? POWER_INFO[mode].color : null;
     this.player.character.setMode(charColor, realDt);
     this.player.animate(dt, this.speed, playing || dying, this.state === GameState.Ready);
+    audio.setDebug(playing && (mode === 'debug' || mode === 'admin'));
+    this.cam.intensity = playing && (mode === 'debug' || mode === 'admin' || mode === 'boost') ? (mode === 'boost' ? 0.6 : 1) : 0;
+    this.cam.beat = THEME.uBeat.value;
     this.cam.update(realDt, this.player, sf, this.state === GameState.Ready);
     this.fx.update(dt, scroll, this.speed, sf, playing || dying, mode, this.powers.has('firewall'));
 
@@ -553,7 +566,7 @@ export class GameManager {
     this.post.tick(realDt);
     const tint = mode === 'admin' ? POWER_INFO.admin.color : mode === 'debug' ? POWER_INFO.debug.color : null;
     if (tint) this.post.tint.set(tint);
-    this.post.tintAmount += ((tint ? (mode === 'admin' ? 0.6 : 1) : 0) - this.post.tintAmount) * Math.min(1, realDt * 5);
+    this.post.tintAmount += ((tint ? (mode === 'admin' ? 0.4 : 0.38) : 0) - this.post.tintAmount) * Math.min(1, realDt * 5);
     this.post.danger = playing && this.health <= 30 ? 0.35 + (1 - this.health / 30) * 0.65 : 0;
     const tier = this.multiplier;
     const hype = playing ? (tier >= 10 ? 0.8 : tier >= 5 ? 0.45 : tier >= 3 ? 0.2 : 0) : 0;
@@ -920,8 +933,6 @@ export class GameManager {
     if (this.pixelRatio > 0.8) {
       this.pixelRatio = Math.max(0.75, this.pixelRatio - 0.25);
       this.onResize();
-      const next = lower(this.quality.level);
-      if (this.pixelRatio <= 0.8 && next) saveQuality(next);
     }
   }
 

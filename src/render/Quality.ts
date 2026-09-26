@@ -51,29 +51,14 @@ export const QUALITY: Record<QualityLevel, QualitySettings> = {
 };
 
 export const LEVELS: readonly QualityLevel[] = ['low', 'medium', 'high', 'ultra'];
-const KEY = 'coderunner.quality.v1';
 
+/**
+ * Graphics always start at the top tier. There is no user-facing setting:
+ * if a device can't hold frame rate, GameManager quietly steps effects down
+ * for that session only (never saved). `?quality=` exists for testing.
+ */
 export function loadQuality(): QualityLevel {
   const param = new URLSearchParams(location.search).get('quality');
   if (param && (LEVELS as readonly string[]).includes(param)) return param as QualityLevel;
-  try {
-    const v = localStorage.getItem(KEY);
-    if (v && (LEVELS as readonly string[]).includes(v)) return v as QualityLevel;
-  } catch {
-    /* ignore */
-  }
-  return 'high';
-}
-
-export function saveQuality(level: QualityLevel): void {
-  try {
-    localStorage.setItem(KEY, level);
-  } catch {
-    /* ignore */
-  }
-}
-
-export function lower(level: QualityLevel): QualityLevel | null {
-  const i = LEVELS.indexOf(level);
-  return i > 0 ? LEVELS[i - 1] : null;
+  return 'ultra';
 }

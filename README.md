@@ -10,6 +10,33 @@ Three.js + TypeScript + Vite, structured for Capacitor (iOS/Android). All art is
 (geometry, shaders, canvas textures). All audio is synthesised with the Web Audio API behind
 `AudioManager`, and any sound can be swapped for a file with `audio.loadFile(id, url)`.
 
+## Graphics
+
+Top quality is the default; there is no graphics menu. If a device can't hold ~45 fps, the game quietly
+steps down for that session (reflections → heavy post → resolution) and never saves the downgrade.
+
+- PBR materials with procedural normal/roughness maps: brushed metal, chrome, carbon fibre, glass, fabric.
+- Per-stage baked environment maps (PMREM) for real metal/glass reflections.
+- Planar mirror reflections on the data-stream floor, dynamic shadows from a key light that follows the runner.
+- Post: depth of field (menus), bloom, radial motion blur at speed, chromatic aberration, vignette, film grain, glitch (only at key moments).
+- Lighting moods per stage: clean = cool cyan, minor bugs = blue/purple, corrupted = red warning strobe,
+  virus = dark, THE CORE = gold/cyan energy.
+- Particle shapes drawn in-shader (sparkles, shards, code glyphs, glitch pixels, velocity streaks) plus a dark
+  alpha-blended layer for virus smoke. Bug fixes assemble a checkmark out of particles.
+- Cinematic camera: handheld drift, speed FOV, lower/livelier in DEBUG / ADMIN, a look-up shot when the virus arrives.
+
+## Music & sound
+
+- **Original procedural hip-hop soundtrack** (`src/audio/HipHopEngine.ts`): 808s with glides, punchy kicks, flammed
+  claps, swung hats with rolls, pads, FM bell hooks, supersaw stabs, formant vocal chops and glitch fills. No samples,
+  no copyrighted music.
+- Three gameplay tracks rotate automatically (every ~32 bars and on stage changes), plus a boss track.
+- Modes: MENU (slow, atmospheric), RUN, DEBUG (more layers, glitch), BOSS (dark phrygian, distorted), GAME OVER (sinks away).
+- **Your own music:** drop `.mp3/.ogg/.wav/.m4a` into `assets/music/` and rebuild — see `assets/music/README.md`
+  (filename picks the mode: `menu`, `boss`, `debug`, `gameover`, anything else = gameplay).
+- Sound settings (gear icon on the menu, SOUND in pause): music volume, SFX volume, mute music, mute SFX. Saved.
+- Beat sync: lighting, road dividers, bloom, HUD glow and particles pulse on the kick/snare.
+
 ## Run
 
 ```bash
@@ -18,7 +45,7 @@ npm run dev            # http://localhost:5173
 npm run build          # typecheck + production build to dist/
 ```
 
-URL flags: `?debug` (FPS / draw calls), `?seed=123` (fixed layout), `?quality=low` (no post-processing).
+URL flags: `?debug` (FPS / draw calls), `?seed=123` (fixed layout), `?quality=low|medium|high|ultra` (testing only; default is ultra).
 
 Tests (need `npx playwright install chromium` once, and the dev server running):
 
@@ -56,9 +83,11 @@ src/
            ObstacleWatcher (clears / near misses), PowerUps, VirusBoss
   world/   Track (data streams + motherboard), ComputerWorld (instanced districts, holo windows, core),
            Obstacles (hazards + bad bugs), Pickups (collectibles, good bugs, power-ups), Spawner (fair generation)
-  fx/      PostFX (bloom, glitch, tints), FXDirector (event → effects), Particles, Trails, SpeedLines
-  audio/   AudioManager (synth SFX + generative music)
-  ui/      HUD (developer dashboard, bug-fix cards, banners, SYSTEM FAILURE, reboot)
+  render/  Quality (tiers + silent auto-degrade), MaterialLib (procedural PBR), Environment (PMREM), Reflection (planar mirror)
+  fx/      PostFX (DOF, bloom, motion blur, glitch, grade), FXDirector (event → effects), Particles (shaped sprites), Trails, SpeedLines
+  audio/   AudioManager (buses, modes, beat sync, SFX), HipHopEngine (procedural soundtrack), synth (instruments), MusicFiles (drop-in tracks)
+  ui/      HUD (glass dashboard, bug-fix cards, banners, sound settings, SYSTEM FAILURE, reboot), premium.css
+assets/music/  drop-in soundtrack files
 scripts/   playtest, scenarios, bot, shot (+ lib)
 ```
 

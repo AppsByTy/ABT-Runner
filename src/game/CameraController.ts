@@ -25,6 +25,16 @@ export class CameraController {
   private dipV = 0;
   private roll = 0;
   private prevPlayerX = 0;
+  /** 0..1 power-mode intensity (DEBUG / ADMIN / BOOST): lower, wider, livelier. */
+  intensity = 0;
+  private intensityS = 0;
+  /** Current music beat envelope (0..1), for subtle beat-synced bob. */
+  beat = 0;
+  /** Cinematic beat: 'boss' looks up at the virus, 'power' swings around the runner. */
+  private cine: 'boss' | 'power' | null = null;
+  private cineT = 0;
+  private cineDur = 1;
+  private cineW = 0;
 
   constructor(aspect: number) {
     this.camera = new THREE.PerspectiveCamera(C.fov, aspect, 0.1, 400);
@@ -64,7 +74,15 @@ export class CameraController {
   }
 
   shake(amount: number): void {
-    this.trauma = Math.min(1, this.trauma + amount);
+    // Keep it tasteful: shake is capped and scaled down.
+    this.trauma = Math.min(0.85, this.trauma + amount * 0.75);
+  }
+
+  /** Short cinematic camera move for major events. */
+  cinematic(kind: 'boss' | 'power', duration: number): void {
+    this.cine = kind;
+    this.cineT = 0;
+    this.cineDur = duration;
   }
 
   update(dt: number, player: PlayerController, speedFactor: number, menu = false): void {
@@ -75,10 +93,25 @@ export class CameraController {
     this.deathBlend += ((player.dead ? 1 : 0) - this.deathBlend) * damp(4, dt);
     this.menuBlend += ((menu ? 1 : 0) - this.menuBlend) * damp(menu ? 3 : 4.5, dt);
     const mb = this.menuBlend * this.menuBlend * (3 - 2 * this.menuBlend); // smoothstep
-    // Chase framing
-    const cx = tx + C.offset.x;
-    const cy = C.offset.y + ty + this.deathBlend * 1.8;
-    const cz = C.offset.z + this.deathBlend * 1.5;
+    this.intensityS += (this.intensity - this.intensityS) * damp(3, dt);
+    const it = this.intensityS * (1 - mb);
+    // Cinematic envelope: ease in, hold, ease out.
+    if (this.cine) {
+      this.cineT += dt;
+      const u = this.cineT / this.cineDur;
+      if (u >= 1) this.cine = null;
+      this.cineW = u < 0.25 ? u / 0.25 : u > 0.7 ? Math.max(0, (1 - u) / 0.3) : 1;
+      this.cineW = this.cineW * this.cineW * (3 - 2 * this.cineW);
+    } else this.cineW = 0;
+    const boss = this.cine === 'boss' ? this.cineW : 0;
+    const pw = this.cine === 'power' ? this.cineW : 0;
+    // Handheld drift: tiny, slow, always on while running.
+    const hx = (Math.sin(this.time * 0.9) * 0.6 + Math.sin(this.time * 2.3) * 0.4) * 0.04 * (1 - mb);
+    const hy = (Math.sin(this.time * 1.3 + 1) * 0.6 + Math.sin(this.time * 3.1) * 0.4) * 0.03 * (1 - mb);
+    // Chase framing (power modes sit lower and tighter; boss intro pulls back and up).
+    const cx = tx + C.offset.x + hx + Math.sin(this.cineT * 3.2) * 1.4 * pw;
+    const cy = C.offset.y + ty + this.deathBlend * 1.8 - it * 0.25 + hy + boss * 0.9 - pw * 0.5 - this.beat * 0.03 * (0.3 + it);
+    const cz = C.offset.z + this.deathBlend * 1.5 - it * 0.3 + boss * 1.6 - pw * 1.1;
     // Menu framing: low, close, slightly off-axis so Ty reads in 3/4 view.
     const portrait = this.aspect < 1;
     const mx = player.x + (portrait ? 0.45 : 0.2);
@@ -91,10 +124,12 @@ export class CameraController {
     const lx = tx + (player.x + (portrait ? 0 : 1.15) - tx) * mb;
     const ly = C.lookHeight + ty + ((portrait ? 0.8 : 1.2) - C.lookHeight - ty) * mb;
     this.look.x += (lx - this.look.x) * k;
-    this.look.y += (ly - this.look.y) * k;
-    this.look.z = -C.lookAhead * (1 - mb);
+    this.look.y += (ly + boss * 3.4 + pw * 0.4 - this.look.y) * k;
+    this.look.z = -C.lookAhead * (1 - mb) * (1 + boss * 1.2);
+    // Menu: slow cinematic orbit sway around Ty.
+    this.pos.x += Math.sin(this.time * 0.35) * 0.35 * mb * k;
 
-    const targetFov = (this.baseFov() + C.fovSpeedBoost * speedFactor) * (1 - mb * 0.25);
+    const targetFov = (this.baseFov() + C.fovSpeedBoost * speedFactor + it * 7 - boss * 6 + pw * 6) * (1 - mb * 0.25);
     this.fovBase += (targetFov - this.fovBase) * damp(3, dt);
     this.fovKick += (0 - this.fovKick) * damp(5, dt);
     this.camera.fov = this.fovBase + this.fovKick;
@@ -108,7 +143,8 @@ export class CameraController {
     // Roll into lane changes, proportional to lateral velocity.
     const vx = dt > 0 ? (player.x - this.prevPlayerX) / dt : 0;
     this.prevPlayerX = player.x;
-    const targetRoll = player.dead ? 0 : Math.max(-0.06, Math.min(0.06, -vx * 0.004)) * (1 - mb);
+    const dutch = it * Math.sin(this.time * 1.4) * 0.025;
+    const targetRoll = player.dead ? 0 : Math.max(-0.06, Math.min(0.06, -vx * 0.004 * (1 + it * 0.6))) * (1 - mb) + dutch;
     this.roll += (targetRoll - this.roll) * damp(10, dt);
 
     this.trauma = Math.max(0, this.trauma - dt * 1.8);
@@ -118,10 +154,10 @@ export class CameraController {
   private apply(_dt: number): void {
     const s = this.trauma * this.trauma;
     const t = this.time * 38;
-    const ox = s * 0.35 * Math.sin(t * 1.3);
-    const oy = s * 0.28 * Math.sin(t * 1.7 + 1.1);
+    const ox = s * 0.22 * (Math.sin(t * 1.3) * 0.7 + Math.sin(t * 2.9) * 0.3);
+    const oy = s * 0.18 * (Math.sin(t * 1.7 + 1.1) * 0.7 + Math.sin(t * 3.3) * 0.3);
     this.camera.position.set(this.pos.x + ox, this.pos.y + oy + this.dipY, this.pos.z);
     this.camera.lookAt(this.look.x + ox * 0.5, this.look.y + oy * 0.5 + this.dipY * 0.6, this.look.z);
-    this.camera.rotation.z += s * 0.05 * Math.sin(t * 0.9) + this.roll;
+    this.camera.rotation.z += s * 0.035 * Math.sin(t * 0.9) + this.roll;
   }
 }

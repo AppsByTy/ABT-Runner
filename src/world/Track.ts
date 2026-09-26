@@ -88,12 +88,18 @@ void main() {
   float edge = smoothstep(0.09, 0.0, abs(ax - uRoadW * 0.5 + 0.12));
   col += edge * uSecondary * 0.8;
 
-  // Corruption creeping in as red glitch patches.
-  float n = vnoise(vec2(x * 0.35, run * 0.08)) * 0.7 + vnoise(vec2(x * 1.3, run * 0.4)) * 0.3;
-  float cm = smoothstep(1.0 - uCorrupt * 0.9, 1.05 - uCorrupt * 0.9, n) * step(0.01, uCorrupt);
-  float flick = step(0.5, hash12(vec2(floor(run * 2.0), floor(uTime * 12.0))));
-  vec3 corruptCol = vec3(1.0, 0.1, 0.25) * (0.25 + 0.35 * flick);
-  col = mix(col, col * 0.4 + corruptCol, cm * 0.8);
+  // Corruption creeping in: dead, darkened floor broken into flickering
+  // glitch tiles with hot red edges and scanlines (not flat colour).
+  vec2 tg = vec2(x * 2.2, run * 1.1);
+  vec2 bq = floor(tg);
+  vec2 tf = fract(tg);
+  float n = vnoise(vec2(x * 0.35, run * 0.08)) * 0.75 + hash12(bq) * 0.25;
+  float cm = smoothstep(1.0 - uCorrupt * 0.72, 1.02 - uCorrupt * 0.72, n) * step(0.01, uCorrupt);
+  float tileEdge = smoothstep(0.07, 0.0, min(min(tf.x, 1.0 - tf.x), min(tf.y, 1.0 - tf.y)));
+  float tileOn = step(0.62, hash12(bq + floor(uTime * 9.0 + hash12(bq) * 5.0)));
+  float scanC = smoothstep(0.3, 0.0, abs(fract(run * 4.0 + uTime * 2.5) - 0.5)) * 0.5;
+  vec3 corruptCol = vec3(1.0, 0.07, 0.2) * (tileEdge * 0.55 * (0.5 + tileOn) + tileOn * 0.1 + scanC * 0.05);
+  col = mix(col, col * 0.2 + corruptCol, cm * 0.9);
 
   // Core: bright energy floor.
   col += uCore * chan * vec3(0.55, 0.85, 1.0) * 0.06;

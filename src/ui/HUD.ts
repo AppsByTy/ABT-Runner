@@ -1,3 +1,4 @@
+import { audio } from '../audio/AudioManager';
 import type { GameState } from '../core/GameState';
 import { POWER_INFO, type PowerType } from '../world/Pickups';
 
@@ -99,7 +100,7 @@ export class HUD {
       </div>
 
       <div class="boss" id="h-boss">
-        <div class="boss-top"><span class="boss-name">⚠ THE VIRUS</span><span id="h-bosstime">0s</span></div>
+        <div class="boss-top"><span class="boss-name"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"><path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18v.5"/></svg>THE VIRUS</span><span id="h-bosstime">0s</span></div>
         <div class="boss-lbl" id="h-bosslbl">PATCHING SYSTEM… 0%</div>
         <div class="bar boss-bar"><i id="h-bossbar"></i></div>
       </div>
@@ -117,6 +118,7 @@ export class HUD {
           <h1 class="brand-title" data-text="CODE RUNNER">CODE RUNNER</h1>
           <div class="tagline">RUN. CODE. FIX. REPEAT.</div>
         </div>
+        <button class="icon-btn menu-gear" data-ui id="b-settings" aria-label="Sound settings"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
         <div class="menu-bottom">
           <div class="legend">
             <span><i class="dot g"></i>Fix green bugs</span>
@@ -132,7 +134,21 @@ export class HUD {
       <div class="panel paused" id="p-paused">
         <div class="term-title">&gt; process paused_</div>
         <button class="btn primary" data-ui id="b-resume">RESUME</button>
+        <button class="btn" data-ui id="b-psettings">SOUND</button>
         <button class="btn" data-ui id="b-quit">MAIN MENU</button>
+      </div>
+
+      <div class="panel settings" id="p-settings" data-ui>
+        <div class="set-title">SOUND</div>
+        <label class="set-row"><span>MUSIC</span><input type="range" min="0" max="100" id="s-music" data-ui /><b id="s-music-v">70</b></label>
+        <label class="set-row"><span>SFX</span><input type="range" min="0" max="100" id="s-sfx" data-ui /><b id="s-sfx-v">85</b></label>
+        <div class="set-toggles">
+          <button class="tgl" data-ui id="s-mmute">MUTE MUSIC</button>
+          <button class="tgl" data-ui id="s-smute">MUTE SFX</button>
+        </div>
+        <div class="now-playing"><i class="eq"><b></b><b></b><b></b><b></b></i><span>NOW PLAYING</span><em id="s-track">—</em></div>
+        <div class="set-note">Original procedural hip-hop. Drop your own tracks into <code>assets/music</code>.</div>
+        <button class="btn primary" data-ui id="s-back">DONE</button>
       </div>
 
       <div class="panel failure" id="p-over">
@@ -140,7 +156,7 @@ export class HUD {
         <h2 class="bsod-title">SYSTEM FAILURE</h2>
         <div class="bsod-code">ERROR CODE: <b>0xAPPSBYTY</b></div>
         <div class="bsod-cause" id="o-cause"></div>
-        <div class="new-best" id="o-newbest">★ NEW HIGH SCORE ★</div>
+        <div class="new-best" id="o-newbest"><svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M12 2l3 7 7 .6-5.3 4.7L18.3 22 12 18l-6.3 4 1.6-7.7L2 9.6 9 9z"/></svg>NEW HIGH SCORE<svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M12 2l3 7 7 .6-5.3 4.7L18.3 22 12 18l-6.3 4 1.6-7.7L2 9.6 9 9z"/></svg></div>
         <div class="rows">
           <div class="row big"><span>SCORE</span><i></i><b id="o-score">0</b></div>
           <div class="row"><span>BUGS FIXED</span><i></i><b id="o-bugs">0</b></div>
@@ -151,7 +167,7 @@ export class HUD {
           <div class="row"><span>SYSTEM HEALTH</span><i></i><b id="o-health" class="bad">0%</b></div>
           <div class="row"><span>HIGH SCORE</span><i></i><b id="o-best">0</b></div>
         </div>
-        <button class="btn primary reboot" data-ui id="b-restart"><span>⟳ REBOOT SYSTEM</span><small>PLAY AGAIN</small></button>
+        <button class="btn primary reboot" data-ui id="b-restart"><span><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>REBOOT SYSTEM</span><small>PLAY AGAIN</small></button>
         <button class="btn" data-ui id="b-menu">MAIN MENU</button>
       </div>
 
@@ -178,6 +194,7 @@ export class HUD {
     this.$('b-quit').addEventListener('click', () => this.onMenu());
     this.$('b-restart').addEventListener('click', () => this.onRestart());
     this.$('b-menu').addEventListener('click', () => this.onMenu());
+    this.initSettings();
 
     const popups = this.$('h-popups');
     for (let i = 0; i < 7; i++) {
@@ -190,10 +207,78 @@ export class HUD {
     for (let i = 0; i < 3; i++) {
       const el = document.createElement('div');
       el.className = 'fix-card';
-      el.innerHTML = '<div class="fc-l1">BUG FOUND</div><div class="fc-l2">PATCHING…</div><div class="fc-bar"><i></i></div><div class="fc-l3">BUG FIXED ✓</div><div class="fc-xp"></div>';
+      el.innerHTML = '<div class="fc-l1">BUG FOUND</div><div class="fc-l2">PATCHING…</div><div class="fc-bar"><i></i></div><div class="fc-l3">BUG FIXED <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l5 5L20 6.5"/></svg></div><div class="fc-xp"></div>';
       cards.appendChild(el);
       this.cardPool.push(el);
     }
+  }
+
+  // ------------------------------------------------------------ sound settings
+
+  private initSettings(): void {
+    const panel = this.$('p-settings');
+    const music = this.$('s-music') as HTMLInputElement;
+    const sfx = this.$('s-sfx') as HTMLInputElement;
+    const sync = (): void => {
+      const st = audio.state;
+      music.value = String(Math.round(st.music * 100));
+      sfx.value = String(Math.round(st.sfx * 100));
+      this.$('s-music-v').textContent = music.value;
+      this.$('s-sfx-v').textContent = sfx.value;
+      music.style.setProperty('--v', `${music.value}%`);
+      sfx.style.setProperty('--v', `${sfx.value}%`);
+      this.$('s-mmute').classList.toggle('on', st.musicMuted);
+      this.$('s-smute').classList.toggle('on', st.sfxMuted);
+      this.$('s-track').textContent = audio.nowPlaying || '—';
+    };
+    const open = (): void => {
+      sync();
+      panel.classList.add('show');
+      this.root.classList.add('settings-open');
+      audio.play('ui');
+    };
+    const close = (): void => {
+      if (!panel.classList.contains('show')) return;
+      panel.classList.remove('show');
+      this.root.classList.remove('settings-open');
+      audio.play('ui');
+    };
+    this.$('b-settings').addEventListener('click', open);
+    this.$('b-psettings').addEventListener('click', open);
+    this.$('s-back').addEventListener('click', close);
+    music.addEventListener('input', () => {
+      audio.setMusicVolume(Number(music.value) / 100);
+      sync();
+    });
+    sfx.addEventListener('input', () => {
+      audio.setSfxVolume(Number(sfx.value) / 100);
+      sync();
+    });
+    sfx.addEventListener('change', () => audio.play('coin'));
+    this.$('s-mmute').addEventListener('click', () => {
+      audio.setMusicMuted(!audio.state.musicMuted);
+      sync();
+    });
+    this.$('s-smute').addEventListener('click', () => {
+      audio.setSfxMuted(!audio.state.sfxMuted);
+      sync();
+      audio.play('ui');
+    });
+    // Stop taps inside the panel from reaching the game.
+    for (const ev of ['pointerdown', 'touchstart'] as const) panel.addEventListener(ev, (e) => e.stopPropagation(), { passive: true });
+    this.closeSettings = close;
+  }
+
+  private closeSettings: () => void = () => {};
+
+  private beatShown = -1;
+
+  /** Beat envelope (0..1) from the soundtrack, exposed to CSS as --beat. */
+  setBeat(v: number): void {
+    const q = Math.round(v * 20) / 20;
+    if (q === this.beatShown) return;
+    this.beatShown = q;
+    this.root.style.setProperty('--beat', q.toFixed(2));
   }
 
   setMuted(m: boolean): void {
@@ -203,6 +288,7 @@ export class HUD {
   }
 
   setState(state: GameState, best: number): void {
+    if (state === 'playing') this.closeSettings();
     const inRun = state === 'playing' || state === 'dying' || state === 'paused';
     this.root.classList.toggle('in-run', inRun);
     this.root.classList.toggle('menu-open', state === 'ready');
