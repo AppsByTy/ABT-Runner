@@ -22,9 +22,9 @@ export class PlanarReflection {
   private readonly clip = new THREE.Vector4();
   private readonly q = new THREE.Vector4();
 
-  constructor(width: number, height: number, scale: number) {
+  constructor(width: number, height: number, scale: number, halfFloat = true) {
     this.scale = scale;
-    this.target = new THREE.WebGLRenderTarget(Math.max(64, width * scale), Math.max(64, height * scale), { type: THREE.HalfFloatType });
+    this.target = new THREE.WebGLRenderTarget(Math.max(64, width * scale), Math.max(64, height * scale), { type: halfFloat ? THREE.HalfFloatType : THREE.UnsignedByteType });
     this.target.texture.generateMipmaps = false;
   }
 

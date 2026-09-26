@@ -13,8 +13,16 @@ import type { QualitySettings } from '../render/Quality';
  *   scene -> [depth of field] -> bloom -> final (motion blur, glitch, chromatic
  *   aberration, tint, vignette, grain, beat pulse) -> output
  */
+/** Can this device render into half-float targets? (needed for HDR bloom) */
+export function canRenderHalfFloat(renderer: THREE.WebGLRenderer): boolean {
+  const ext = renderer.extensions;
+  return ext.has('EXT_color_buffer_float') || ext.has('EXT_color_buffer_half_float');
+}
+
 export class PostFX {
-  readonly enabled: boolean;
+  /** 0 = full chain, 1 = no MSAA/DOF, 2 = 8-bit targets, 3 = post bypassed. */
+  safeLevel = 0;
+  private readonly halfFloatOk: boolean;
   private composer?: EffectComposer;
   private bloom?: UnrealBloomPass;
   private bokeh?: BokehPass;
@@ -46,16 +54,62 @@ export class PostFX {
     this.scene = scene;
     this.camera = camera;
     this.q = quality;
-    this.enabled = quality.post;
     this.motionBlurOn = quality.motionBlur;
     this.dofOn = quality.dof;
-    if (!this.enabled) return;
+    this.halfFloatOk = canRenderHalfFloat(renderer);
+    if (!this.halfFloatOk) this.safeLevel = 2;
+    this.build();
+  }
 
+  get enabled(): boolean {
+    return this.q.post && this.safeLevel < 3;
+  }
+
+  /** Step down to a more compatible post chain (black-screen watchdog). Returns false when nothing is left. */
+  fallback(): boolean {
+    if (!this.enabled) return false;
+    this.safeLevel = this.safeLevel === 0 ? 1 : this.safeLevel === 1 ? 2 : 3;
+    this.composer?.dispose();
+    this.composer = undefined;
+    this.bloom = this.bokeh = this.final = undefined;
+    this.build();
+    return true;
+  }
+
+  private build(): void {
+    if (!this.enabled) return;
+    const renderer = this.renderer;
+    const scene = this.scene;
+    const camera = this.camera;
+    const quality = this.q;
+    const safe = this.safeLevel;
     const size = renderer.getSize(new THREE.Vector2());
-    const target = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: quality.msaa });
+    const target = new THREE.WebGLRenderTarget(size.x, size.y, {
+      type: safe >= 2 ? THREE.UnsignedByteType : THREE.HalfFloatType,
+      samples: safe >= 1 ? 0 : quality.msaa,
+    });
     this.composer = new EffectComposer(renderer, target);
+    this.composer.setPixelRatio(renderer.getPixelRatio());
+    this.composer.setSize(size.x, size.y);
     this.composer.addPass(new RenderPass(scene, camera));
-    if (quality.dof) {
+    // NaN / Inf guard: one bad pixel must never be blurred across the whole screen by bloom.
+    // (min/max map to fmin/fmax on Apple GPUs, which return the non-NaN operand.)
+    this.composer.addPass(
+      new ShaderPass({
+        uniforms: { tDiffuse: { value: null } },
+        vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+        fragmentShader: /* glsl */ `
+          uniform sampler2D tDiffuse;
+          varying vec2 vUv;
+          void main() {
+            vec3 c = texture2D(tDiffuse, vUv).rgb;
+            c = max(min(c, vec3(48.0)), vec3(0.0));
+            if (any(isnan(c)) || any(isinf(c))) c = vec3(0.0);
+            gl_FragColor = vec4(c, 1.0);
+          }`,
+      }),
+    );
+    if (quality.dof && safe < 1) {
       this.bokeh = new BokehPass(scene, camera, { focus: 4, aperture: 0.004, maxblur: 0.01 });
       this.bokeh.enabled = false;
       this.composer.addPass(this.bokeh);
@@ -187,7 +241,7 @@ export class PostFX {
   }
 
   render(dt: number, speedFactor: number): void {
-    if (!this.composer || !this.final) {
+    if (!this.enabled || !this.composer || !this.final) {
       this.renderer.render(this.scene, this.camera);
       return;
     }

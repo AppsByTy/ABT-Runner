@@ -13,7 +13,7 @@ export async function open(browser, url, viewport = { width: 1280, height: 720 }
     if ((m.type() === 'error' || m.type() === 'warning') && !/swiftshader|GPU stall|WebGL|GroupMarkerNotSet/i.test(m.text())) errors.push(`[${m.type()}] ${m.text()}`);
   });
   await page.goto(url, { waitUntil: 'networkidle' });
-  await page.waitForFunction(() => window.__game && window.__events);
+  await page.waitForFunction(() => window.__game && window.__events, null, { timeout: 240000 });
   return { page, errors };
 }
 

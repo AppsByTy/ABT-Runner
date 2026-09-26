@@ -17,7 +17,8 @@ import { ThemeLinks } from '../world/ThemeLinks';
 import { ObstacleManager, KIND_LABEL, isBadBug, type Obstacle, type ObstacleKind } from '../world/Obstacles';
 import { PickupManager, POWER_INFO, type Pickup, type PowerType } from '../world/Pickups';
 import { Spawner } from '../world/Spawner';
-import { PostFX } from '../fx/PostFX';
+import { PostFX, canRenderHalfFloat } from '../fx/PostFX';
+import { RenderWatchdog, showDiagnostics } from '../render/Watchdog';
 import { FXDirector } from '../fx/FXDirector';
 import { HUD } from '../ui/HUD';
 import { audio } from '../audio/AudioManager';
@@ -81,6 +82,8 @@ export class GameManager {
   readonly combo = new ComboSystem();
   readonly watcher = new ObstacleWatcher();
   readonly post: PostFX;
+  private readonly watchdog: RenderWatchdog;
+  private recoverStep = 0;
   readonly fx: FXDirector;
   readonly hud: HUD;
 
@@ -151,11 +154,19 @@ export class GameManager {
     const seedParam = params.get('seed');
     this.seed = seedParam !== null ? Number(seedParam) : undefined;
     const q = (this.quality = { ...QUALITY[loadQuality()] });
+    // Phones already render at 2-3x density; multisampled half-float targets are
+    // also a known black-screen source on iOS WebGL, so phones skip MSAA.
+    const touchDevice = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Mac/.test(navigator.userAgent));
+    if (touchDevice) {
+      q.msaa = 0;
+      q.dof = false;
+    }
 
     this.renderer = new THREE.WebGLRenderer({ antialias: !q.post, powerPreference: 'high-performance' });
     this.pixelRatio = Math.min(window.devicePixelRatio, q.pixelRatio);
     this.renderer.setPixelRatio(this.pixelRatio);
     this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.watchdog = new RenderWatchdog(this.renderer);
     this.renderer.info.autoReset = false;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -207,7 +218,7 @@ export class GameManager {
     this.cam = new CameraController(window.innerWidth / window.innerHeight);
     this.track = new Track(this.scene, this.links, this.lib);
     this.world = new ComputerWorld(this.scene, this.links, this.lib, q);
-    this.reflection = q.reflections ? new PlanarReflection(window.innerWidth * this.pixelRatio, window.innerHeight * this.pixelRatio, q.reflectionScale) : null;
+    this.reflection = q.reflections ? new PlanarReflection(window.innerWidth * this.pixelRatio, window.innerHeight * this.pixelRatio, q.reflectionScale, canRenderHalfFloat(this.renderer)) : null;
     if (this.reflection) {
       this.track.reflectUniforms.uReflect.value = this.reflection.target.texture;
       this.track.reflectUniforms.uReflectOn.value = 1;
@@ -252,7 +263,18 @@ export class GameManager {
     audio.setIntensity(0);
     // Pre-compile every shader (incl. pooled, not-yet-visible hazards, bosses
     // and power-ups) during the menu so nothing hitches mid-run.
-    void this.renderer.compileAsync(this.scene, this.cam.camera).catch(() => {});
+    window.setTimeout(() => void this.renderer.compileAsync(this.scene, this.cam.camera).catch(() => {}), 600);
+    if (new URLSearchParams(location.search).has('diag')) {
+      window.setInterval(
+        () =>
+          showDiagnostics(this.renderer, [
+            `quality ${this.quality.level} · post level ${this.post.safeLevel} · halfFloat ${canRenderHalfFloat(this.renderer)} · reflections ${!!this.reflection} · shadows ${this.renderer.shadowMap.enabled}`,
+            `pixelRatio ${this.pixelRatio} · calls ${this.renderer.info.render.calls} · watchdog ${this.watchdog.done ? 'ok' : 'checking'}`,
+            ...this.watchdog.errors,
+          ]),
+        1000,
+      );
+    }
   }
 
   private setViewportSizes(): void {
@@ -592,6 +614,7 @@ export class GameManager {
         (this.track.reflectUniforms.uReflectMatrix.value as THREE.Matrix4).copy(this.reflection.textureMatrix);
       }
       this.post.render(realDt, playing ? sf : 0);
+      if (!this.watchdog.done && this.autoLoop && this.watchdog.check(this.renderer.getContext())) this.recoverBlackScreen();
     }
 
     if (this.debug) {
@@ -916,6 +939,34 @@ export class GameManager {
         this.glitchTimer = 7 + Math.random() * 9 - st.glitch * 30;
       }
     }
+  }
+
+  /**
+   * The finished frame keeps coming out black: step the pipeline down until
+   * something shows (post chain -> reflections -> shadows -> plain render),
+   * then show diagnostics if even that fails.
+   */
+  private recoverBlackScreen(): void {
+    this.recoverStep++;
+    this.watchdog.log(`black frame -> recovery step ${this.recoverStep} (post level ${this.post.safeLevel})`);
+    if (this.post.fallback()) return;
+    if (this.reflection) {
+      this.reflection = null;
+      this.track.reflectUniforms.uReflectOn.value = 0;
+      return;
+    }
+    if (this.renderer.shadowMap.enabled) {
+      this.renderer.shadowMap.enabled = false;
+      this.key.castShadow = false;
+      this.shadowCatcher.visible = false;
+      this.scene.traverse((o) => {
+        const m = (o as THREE.Mesh).material;
+        if (m) (Array.isArray(m) ? m : [m]).forEach((x) => (x.needsUpdate = true));
+      });
+      return;
+    }
+    this.watchdog.done = true;
+    showDiagnostics(this.renderer, this.watchdog.errors);
   }
 
   /** Performance fallback ladder: reflections -> heavy post -> resolution -> quality tier. */
