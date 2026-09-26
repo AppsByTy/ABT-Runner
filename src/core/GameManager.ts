@@ -125,8 +125,6 @@ export class GameManager {
   private fpsAccum = 0;
   private fpsFrames = 0;
   private pixelRatio = 1;
-  private perfTime = 0;
-  private perfFrames = 0;
   private debugBlend = 0;
   private rebooting = false;
   private coinStreak = 0;
@@ -140,7 +138,6 @@ export class GameManager {
   private readonly shadowCatcher: THREE.Mesh;
   private envKey = 'stage1';
   private glitchTimer = 6;
-  private degradeStep = 0;
   private readonly white = new THREE.Color(1, 1, 1);
   private readonly red = new THREE.Color('#ff1030');
   private readonly pBox = makeAABB();
@@ -526,7 +523,6 @@ export class GameManager {
   private frame(realDt: number): void {
     this.stateTime += realDt;
     this.renderer.info.reset();
-    this.adaptResolution(realDt);
     const playing = this.state === GameState.Playing;
     const dying = this.state === GameState.Dying;
 
@@ -967,38 +963,6 @@ export class GameManager {
     }
     this.watchdog.done = true;
     showDiagnostics(this.renderer, this.watchdog.errors);
-  }
-
-  /** Performance fallback ladder: reflections -> heavy post -> resolution -> quality tier. */
-  private degrade(): void {
-    this.degradeStep++;
-    if (this.degradeStep === 1 && this.reflection) {
-      this.reflection = null;
-      this.track.reflectUniforms.uReflectOn.value = 0;
-      return;
-    }
-    if (this.degradeStep <= 2) {
-      this.post.degrade();
-      return;
-    }
-    if (this.pixelRatio > 0.8) {
-      this.pixelRatio = Math.max(0.75, this.pixelRatio - 0.25);
-      this.onResize();
-    }
-  }
-
-  /**
-   * If a run averages under ~45 fps for 2 s, step render resolution down
-   * (min 0.75x device pixels). Full graphics settings arrive in Phase 6.
-   */
-  private adaptResolution(dt: number): void {
-    if (this.state !== GameState.Playing || !this.autoLoop) return;
-    this.perfTime += dt;
-    this.perfFrames++;
-    if (this.perfTime < 2) return;
-    const fps = this.perfFrames / this.perfTime;
-    this.perfTime = this.perfFrames = 0;
-    if (fps < 45) this.degrade();
   }
 
   private onResize = (): void => {

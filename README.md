@@ -12,8 +12,9 @@ Three.js + TypeScript + Vite, structured for Capacitor (iOS/Android). All art is
 
 ## Graphics
 
-Top quality is the default; there is no graphics menu. If a device can't hold ~45 fps, the game quietly
-steps down for that session (reflections → heavy post → resolution) and never saves the downgrade.
+Graphics always run at top quality: no graphics menu and no automatic downgrade for performance.
+The only fallback is a black-screen safety net: if a device's GPU fails to draw the frame at all, the
+game switches the failing effect off so the game is visible instead of black.
 
 - PBR materials with procedural normal/roughness maps: brushed metal, chrome, carbon fibre, glass, fabric.
 - Per-stage baked environment maps (PMREM) for real metal/glass reflections.

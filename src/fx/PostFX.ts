@@ -227,13 +227,6 @@ export class PostFX {
     this.bloom?.resolution.set(w / div, h / div);
   }
 
-  /** Performance fallback: drop the heaviest optional passes. */
-  degrade(): void {
-    this.motionBlurOn = false;
-    this.dofOn = false;
-    if (this.bokeh) this.bokeh.enabled = false;
-  }
-
   tick(dt: number): void {
     this.aberrationPulse = Math.max(0, this.aberrationPulse - dt * 2.5);
     this.glitchPulse = Math.max(0, this.glitchPulse - dt * 2.4);

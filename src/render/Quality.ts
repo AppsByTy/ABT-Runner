@@ -53,9 +53,8 @@ export const QUALITY: Record<QualityLevel, QualitySettings> = {
 export const LEVELS: readonly QualityLevel[] = ['low', 'medium', 'high', 'ultra'];
 
 /**
- * Graphics always start at the top tier. There is no user-facing setting:
- * if a device can't hold frame rate, GameManager quietly steps effects down
- * for that session only (never saved). `?quality=` exists for testing.
+ * Graphics always run at the top tier. There is no user-facing setting and
+ * no automatic downgrade for performance. `?quality=` exists for testing.
  */
 export function loadQuality(): QualityLevel {
   const param = new URLSearchParams(location.search).get('quality');
