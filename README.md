@@ -38,6 +38,12 @@ game switches the failing effect off so the game is visible instead of black.
 - Sound settings (gear icon on the menu, SOUND in pause): music volume, SFX volume, mute music, mute SFX. Saved.
 - Beat sync: lighting, road dividers, bloom, HUD glow and particles pulse on the kick/snare.
 
+## Run on Replit
+
+Import this GitHub repo into Replit (Create Repl → Import from GitHub). Press **Run**: it installs and starts
+the dev server on port 5173 and opens the webview. **Deploy → Static** builds to `dist/` and publishes it
+(config in `.replit`).
+
 ## Run
 
 ```bash

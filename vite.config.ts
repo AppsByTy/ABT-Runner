@@ -4,7 +4,9 @@ import { defineConfig } from 'vite';
 // native WebView (file/capacitor scheme) as well as on a normal web host.
 export default defineConfig({
   base: './',
-  server: { host: true, port: 5173 },
+  // host + allowedHosts let Replit / phones on the LAN open the dev server.
+  server: { host: true, port: 5173, allowedHosts: true },
+  preview: { host: true, port: 5173, allowedHosts: true },
   build: {
     target: 'es2020',
     outDir: 'dist',
