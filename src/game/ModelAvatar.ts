@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { GLTFLoader, type GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { rimify } from '../utils/rim';
 
 /**
@@ -68,7 +67,7 @@ export class ModelAvatar {
   phaseOffset = 0;
   readonly outlineUniform = { value: 0.9 };
 
-  constructor(gltf: GLTF) {
+  constructor(gltf: GLTF, albedo: THREE.Texture | null = null) {
     const scene = gltf.scene;
     this.root.add(scene);
 
@@ -81,7 +80,7 @@ export class ModelAvatar {
       mesh.frustumCulled = false;
       const src = mesh.material as THREE.MeshStandardMaterial;
       const mat = new THREE.MeshStandardMaterial({
-        map: src.map,
+        map: albedo ?? src.map,
         color: 0xd8d8d8,
         roughness: 0.82,
         metalness: 0,
@@ -235,10 +234,38 @@ export class ModelAvatar {
   }
 }
 
-let loader: GLTFLoader | null = null;
+/** Decode a data: URL (inlined asset) to bytes without fetch() (works under strict page CSPs). */
+function dataUrlBytes(url: string): Uint8Array<ArrayBuffer> {
+  const b64 = url.slice(url.indexOf(',') + 1);
+  const bin = atob(b64);
+  const out = new Uint8Array(new ArrayBuffer(bin.length));
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
 
-export async function loadAvatar(url: string): Promise<ModelAvatar> {
-  loader ??= new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
-  const gltf = await loader.loadAsync(url);
-  return new ModelAvatar(gltf);
+async function bytesOf(url: string): Promise<ArrayBuffer> {
+  if (url.startsWith('data:')) return dataUrlBytes(url).buffer;
+  return (await fetch(url)).arrayBuffer();
+}
+
+/**
+ * Load the runner model. Deliberately avoids every browser feature a strict
+ * embed can block: no network fetch for inlined assets, no WebAssembly
+ * decoders, no blob:/data: image URLs (the texture is decoded straight from
+ * bytes with createImageBitmap).
+ */
+export async function loadAvatar(meshUrl: string, albedoUrl: string): Promise<ModelAvatar> {
+  const [meshBuf, texBuf] = await Promise.all([bytesOf(meshUrl), bytesOf(albedoUrl)]);
+  const gltf = await new GLTFLoader().parseAsync(meshBuf, '');
+  let albedo: THREE.Texture | null = null;
+  try {
+    const bmp = await createImageBitmap(new Blob([texBuf], { type: 'image/jpeg' }), { imageOrientation: 'none' });
+    albedo = new THREE.Texture(bmp);
+    albedo.flipY = false;
+    albedo.colorSpace = THREE.SRGBColorSpace;
+    albedo.needsUpdate = true;
+  } catch {
+    albedo = null;
+  }
+  return new ModelAvatar(gltf, albedo);
 }

@@ -20,7 +20,8 @@ import { Spawner } from '../world/Spawner';
 import { PostFX, canRenderHalfFloat } from '../fx/PostFX';
 import { RenderWatchdog, showDiagnostics } from '../render/Watchdog';
 import { loadAvatar } from '../game/ModelAvatar';
-import tyModelUrl from '../assets/models/ty.glb?url';
+import tyMeshUrl from '../assets/models/ty-mesh.glb?inline';
+import tyAlbedoUrl from '../assets/models/ty-albedo.jpg?inline';
 import { FXDirector } from '../fx/FXDirector';
 import { HUD } from '../ui/HUD';
 import { audio } from '../audio/AudioManager';
@@ -263,7 +264,7 @@ export class GameManager {
     // Pre-compile every shader (incl. pooled, not-yet-visible hazards, bosses
     // and power-ups) during the menu so nothing hitches mid-run.
     // Sculpted 3D runner model (falls back to the procedural character if it can't load).
-    loadAvatar(tyModelUrl)
+    loadAvatar(tyMeshUrl, tyAlbedoUrl)
       .then((av) => {
         this.player.character.attachModel(av);
         if (this.renderEnabled) void this.renderer.compileAsync(this.scene, this.cam.camera).catch(() => {});
