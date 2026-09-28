@@ -19,10 +19,12 @@ jobs:
           mkdir -p public/models art/raw
           for row in $(jq -c '.[]' art/models.json); do
             name=$(echo "$row" | jq -r .name); url=$(echo "$row" | jq -r .url)
-            [ -f "art/raw/$name.glb" ] && [ "$(echo "$row" | jq -r '.force // false')" != "true" ] && continue
-            curl -fsSL "$url" -o "art/raw/$name.glb"
-            ls -la "art/raw/$name.glb"
+            ext="${url##*.}"; ext="${ext%%\?*}"
+            [ -f "art/raw/$name.$ext" ] && [ "$(echo "$row" | jq -r '.force // false')" != "true" ] && continue
+            curl -fsSL "$url" -o "art/raw/$name.$ext"
+            ls -la "art/raw/$name.$ext"
           done
+          shopt -s nullglob
           for f in art/raw/*.glb; do
             n=$(basename "$f" .glb)
             npx -y @gltf-transform/cli@4 optimize "$f" "public/models/$n.glb" --compress meshopt --texture-compress webp --texture-size 1024 --simplify false || cp "$f" "public/models/$n.glb"
