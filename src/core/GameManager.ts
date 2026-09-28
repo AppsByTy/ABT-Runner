@@ -19,9 +19,6 @@ import { PickupManager, POWER_INFO, type Pickup, type PowerType } from '../world
 import { Spawner } from '../world/Spawner';
 import { PostFX, canRenderHalfFloat } from '../fx/PostFX';
 import { RenderWatchdog, rememberError, showDiagnostics } from '../render/Watchdog';
-import { loadAvatar } from '../game/ModelAvatar';
-import tyMeshUrl from '../assets/models/ty-mesh.glb?inline';
-import tyAlbedoUrl from '../assets/models/ty-albedo.rgb?inline';
 import { FXDirector } from '../fx/FXDirector';
 import { HUD } from '../ui/HUD';
 import { audio } from '../audio/AudioManager';
@@ -264,13 +261,6 @@ export class GameManager {
     audio.setIntensity(0);
     // Pre-compile every shader (incl. pooled, not-yet-visible hazards, bosses
     // and power-ups) during the menu so nothing hitches mid-run.
-    // Sculpted 3D runner model (falls back to the procedural character if it can't load).
-    loadAvatar(tyMeshUrl, tyAlbedoUrl)
-      .then((av) => {
-        this.player.character.attachModel(av);
-        if (this.renderEnabled) void this.renderer.compileAsync(this.scene, this.cam.camera).catch(() => {});
-      })
-      .catch((e) => this.watchdog.log(`model: ${String(e).slice(0, 160)}`));
     window.setTimeout(() => void this.renderer.compileAsync(this.scene, this.cam.camera).catch(() => {}), 600);
     // If the previous session died with an error, show the report once so it can be screenshotted.
     if (this.watchdog.previous) {
