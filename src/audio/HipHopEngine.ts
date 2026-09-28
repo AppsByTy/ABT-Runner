@@ -1,4 +1,5 @@
-import { bass808, bell, clap, glitch, hat, kick, pad, rim, stab, sweep, vox, type Buses } from './synth';
+import type { Buses } from './synth';
+import { VoiceBank } from './VoiceBank';
 
 /**
  * Procedural hip-hop / trap soundtrack. Original compositions generated in
@@ -132,8 +133,12 @@ export class HipHopEngine {
   /** Bars since the last automatic track change. */
   private barsOnSong = 0;
 
+  /** Pre-rendered instrument voices (keeps live audio-node churn tiny). */
+  readonly v: VoiceBank;
+
   constructor(ctx: AudioContext, drums: Buses, bassOut: AudioNode, inst: Buses) {
     this.ctx = ctx;
+    this.v = new VoiceBank(ctx);
     this.drums = drums;
     this.bassOut = bassOut;
     this.inst = inst;
@@ -141,6 +146,33 @@ export class HipHopEngine {
 
   get songName(): string {
     return this.mode === 'boss' ? BOSS_SONG.name : this.song.name;
+  }
+
+  /** Render every voice the soundtrack will need, ahead of time, in the background. */
+  warm(): void {
+    const save = { mode: this.mode, intensity: this.intensity, song: this.song, bar: this.bar, phraseBar: this.phraseBar, bpm: this.bpm };
+    const beats = this.beats.length;
+    this.v.dry = true;
+    const passes: [MusicMode, number, Song][] = [];
+    for (const song of SONGS) {
+      passes.push(['menu', 1, song], ['run', 1, song], ['run', 3, song], ['debug', 3, song]);
+    }
+    passes.push(['boss', 3, BOSS_SONG]);
+    for (const [mode, I, song] of passes) {
+      this.mode = mode;
+      this.intensity = I;
+      this.song = song;
+      this.bpm = mode === 'menu' ? 88 : song.bpm;
+      const sx = 60 / this.bpm / 4;
+      for (let bar = 0; bar < 8; bar++) {
+        this.bar = bar;
+        this.phraseBar = bar;
+        for (let st = 0; st < 16; st++) this.playStep((bar % 2) * 16 + st, 0, sx);
+      }
+    }
+    this.v.dry = false;
+    this.beats.length = beats;
+    Object.assign(this, save);
   }
 
   start(): void {
@@ -207,7 +239,6 @@ export class HipHopEngine {
   }
 
   private playStep(s: number, t: number, sx: number): void {
-    const ctx = this.ctx;
     const song = this.mode === 'boss' ? BOSS_SONG : this.song;
     const mode = this.mode;
     const I = mode === 'debug' ? 3 : mode === 'boss' ? 3 : this.intensity;
@@ -224,18 +255,18 @@ export class HipHopEngine {
     if (mode === 'menu' || mode === 'gameover') {
       if (barStep === 0 && this.bar % 2 === 0) {
         const tri = ch.minor ? 3 : 4;
-        pad(ctx, this.inst, t, [root + 36, root + 36 + tri, root + 43, root + 46], sx * 32, mode === 'gameover' ? 0.8 : 1, 0.7);
+        this.v.pad(this.inst, t, [root + 36, root + 36 + tri, root + 43, root + 46], sx * 32, mode === 'gameover' ? 0.8 : 1, 0.7);
       }
       if (mode === 'gameover') return;
       // Lo-fi half-time groove.
       if (barStep === 0 || (barStep === 10 && this.bar % 2 === 1)) {
-        kick(ctx, this.drums.out, t, 0.55);
-        if (barStep === 0) bass808(ctx, this.bassOut, t, bassNote, sx * 12, 0.7, undefined, 1.5);
+        this.v.kick(this.drums, t, 0.55);
+        if (barStep === 0) this.v.bass808(this.bassOut, t, bassNote, sx * 12, 0.7, undefined, 1.5);
       }
-      if (barStep === 8) rim(ctx, this.drums, t, 0.7);
-      if (barStep % 4 === 2) hat(ctx, this.drums.out, t, 0.35 * hum(), false, 0.8);
+      if (barStep === 8) this.v.rim(this.drums, t, 0.7);
+      if (barStep % 4 === 2) this.v.hat(this.drums, t, 0.35 * hum(), false, 0.8);
       const h = song.hook.find(([st]) => st === s);
-      if (h && this.bar % 4 < 2) bell(ctx, this.inst, t, song.key + 48 + penta(h[1]), sx * h[2] * 2, 0.55, song.bellRatio, 0.7);
+      if (h && this.bar % 4 < 2) this.v.bell(this.inst, t, song.key + 48 + penta(h[1]), sx * h[2] * 2, 0.55, song.bellRatio, 0.7);
       return;
     }
 
@@ -243,9 +274,9 @@ export class HipHopEngine {
     // Kick + 808.
     if (song.kick[s]) {
       const vel = barStep === 0 ? 1 : 0.9;
-      kick(ctx, this.drums.out, t, vel, mode === 'boss' ? 1.1 : 1);
+      this.v.kick(this.drums, t, vel, mode === 'boss' ? 1.1 : 1);
       this.beats.push({ time: t, kind: 'kick', bar: this.bar });
-      if (this.duck) {
+      if (this.duck && !this.v.dry) {
         this.duck.gain.setValueAtTime(0.45, t);
         this.duck.gain.setTargetAtTime(1, t + 0.02, 0.09);
       }
@@ -254,17 +285,17 @@ export class HipHopEngine {
       while (n < 16 && !song.kick[(s + n) % 32]) n++;
       const glide = I >= 2 && s >= 26 && this.bar % 2 === 1 ? song.key + nextCh.deg - (song.key + nextCh.deg > song.key + 7 ? 12 : 0) : undefined;
       const oct = I >= 3 && s % 16 === 10 ? 12 : 0;
-      bass808(ctx, this.bassOut, t, bassNote + oct, sx * n * 0.95, 1, glide, song.drive);
+      this.v.bass808(this.bassOut, t, bassNote + oct, sx * n * 0.95, 1, glide, song.drive);
     }
     // Snare/clap on beat 3 of each bar (half-time trap), rolls in fills.
     if (barStep === 8) {
-      clap(ctx, this.drums, t, 1);
+      this.v.clap(this.drums, t, 1);
       this.beats.push({ time: t, kind: 'snare', bar: this.bar });
     }
     if (lastBar && barStep >= 12 && I >= 1) {
       // Snare roll into the next phrase.
       const n = barStep >= 14 ? 2 : 1;
-      for (let i = 0; i < n; i++) clap(ctx, this.drums, t + (i * sx) / n, 0.35 + (barStep - 12) * 0.12, 0.2);
+      for (let i = 0; i < n; i++) this.v.clap(this.drums, t + (i * sx) / n, 0.35 + (barStep - 12) * 0.12, 0.2);
     }
     // Hats: 8ths at low intensity, 16ths above, with triplet / 32nd rolls.
     const hatEvery = I >= 2 ? 1 : 2;
@@ -272,22 +303,22 @@ export class HipHopEngine {
       const rollHere = (I >= 2 && (barStep === 6 || barStep === 14) && this.bar % 2 === 1) || (lastBar && barStep >= 12);
       if (rollHere) {
         const n = barStep === 14 || mode === 'boss' ? 4 : 3;
-        for (let i = 0; i < n; i++) hat(ctx, this.drums.out, t + (i * sx) / n, 0.45 + i * 0.12, false, 1 + i * 0.03);
+        for (let i = 0; i < n; i++) this.v.hat(this.drums, t + (i * sx) / n, 0.45 + i * 0.12, false, 1 + i * 0.03);
       } else {
-        hat(ctx, this.drums.out, t, (barStep % 4 === 0 ? 0.75 : 0.5) * hum(), false);
+        this.v.hat(this.drums, t, (barStep % 4 === 0 ? 0.75 : 0.5) * hum(), false);
       }
     }
-    if (I >= 2 && barStep === 12 && this.bar % 2 === 0) hat(ctx, this.drums.out, t, 0.5, true);
-    if (I >= 1 && barStep === 3 && this.bar % 4 === 3) rim(ctx, this.drums, t, 0.6);
+    if (I >= 2 && barStep === 12 && this.bar % 2 === 0) this.v.hat(this.drums, t, 0.5, true);
+    if (I >= 1 && barStep === 3 && this.bar % 4 === 3) this.v.rim(this.drums, t, 0.6);
 
     // Pad on chord changes.
     if (barStep === 0 && this.bar % 2 === 0) {
       const tri = ch.minor ? 3 : 4;
-      pad(ctx, this.inst, t, [root + 36, root + 36 + tri, root + 43, root + 46], sx * 32, mode === 'boss' ? 0.9 : 0.75, song.padBright * (I >= 3 ? 1.5 : 1));
+      this.v.pad(this.inst, t, [root + 36, root + 36 + tri, root + 43, root + 46], sx * 32, mode === 'boss' ? 0.9 : 0.75, song.padBright * (I >= 3 ? 1.5 : 1));
     }
     // Phrase start: open "crash" hat + reverse swell.
-    if (this.phraseBar === 0 && barStep === 0) hat(ctx, this.drums.out, t, 0.6, true, 0.7);
-    if (lastBar && barStep === 8) sweep(ctx, this.inst, t, sx * 8, true, 0.7 + I * 0.1);
+    if (this.phraseBar === 0 && barStep === 0) this.v.hat(this.drums, t, 0.6, true, 0.7);
+    if (lastBar && barStep === 8) this.v.sweep(this.inst, t, sx * 8, true, 0.7 + I * 0.1);
 
     // Lead hook (from intensity 2, or every other phrase at 1).
     const leadOn = I >= 2 || (I >= 1 && Math.floor(this.bar / 8) % 2 === 1);
@@ -295,21 +326,21 @@ export class HipHopEngine {
       const h = song.hook.find(([st]) => st === s);
       if (h) {
         const note = song.key + 48 + penta(h[1]);
-        if (song.lead === 'bell') bell(ctx, this.inst, t, note, sx * h[2] * 1.6, 1, song.bellRatio);
-        else stab(ctx, this.inst, t, [note, note + 7], sx * h[2] * 1.2, 1, mode === 'boss' ? 2200 : 3600);
+        if (song.lead === 'bell') this.v.bell(this.inst, t, note, sx * h[2] * 1.6, 1, song.bellRatio);
+        else this.v.stab(this.inst, t, [note, note + 7], sx * h[2] * 1.2, 1, mode === 'boss' ? 2200 : 3600);
       }
     }
     // Vocal chops at high energy.
     if (I >= 3) {
       const v = song.vox.find(([st]) => st === s);
-      if (v && this.bar % 2 === 1) vox(ctx, this.inst, t, song.key + 36 + v[1], sx * v[3], v[2], 0.9, v[4]);
+      if (v && this.bar % 2 === 1) this.v.vox(this.inst, t, song.key + 36 + v[1], sx * v[3], v[2], 0.9, v[4]);
     }
     // Debug mode: glitch stutters and a brighter counter-melody.
-    if (mode === 'debug' && barStep === 14 && this.bar % 2 === 1) glitch(ctx, this.inst, t, sx * 2, 1);
-    if (mode === 'debug' && barStep % 4 === 2) bell(ctx, this.inst, t, song.key + 60 + penta((s * 3) % 7), sx * 1.5, 0.35, 7, 0.6);
+    if (mode === 'debug' && barStep === 14 && this.bar % 2 === 1) this.v.glitch(this.inst, t, sx * 2, 1);
+    if (mode === 'debug' && barStep % 4 === 2) this.v.bell(this.inst, t, song.key + 60 + penta((s * 3) % 7), sx * 1.5, 0.35, 7, 0.6);
     // Boss: siren.
     if (mode === 'boss' && barStep === 0 && this.bar % 2 === 1) {
-      stab(ctx, this.inst, t, [root + 55], sx * 8, 0.8, 1800);
+      this.v.stab(this.inst, t, [root + 55], sx * 8, 0.8, 1800);
     }
   }
 }

@@ -263,6 +263,7 @@ export class AudioManager {
     this.engine.duck = duck;
     this.engine.delayNode = delay;
     this.engine.intensity = this.intensity;
+    this.engine.warm();
 
     this.applyGains();
     this.applyMode(true);

@@ -9,39 +9,29 @@ import { STAGES } from '../core/Theme';
  * as real materials instead of flat plastic.
  */
 export class EnvironmentMaps {
-  /** Baked maps, most recently used last. Only a few are kept on the GPU at once (phone memory). */
+  /**
+   * All maps are baked once at startup at 128px (the lighting is heavily
+   * blurred, so this looks identical to 256px at a quarter of the memory)
+   * and never reallocated mid-run: no GPU allocation spikes when a stage
+   * changes or a power-up starts.
+   */
   private readonly maps = new Map<string, THREE.WebGLRenderTarget>();
   private readonly pmrem: THREE.PMREMGenerator;
-  private static readonly KEEP = 3;
 
   constructor(renderer: THREE.WebGLRenderer) {
     this.pmrem = new THREE.PMREMGenerator(renderer);
-    this.get('stage1');
+    for (const st of STAGES) this.maps.set(`stage${st.id}`, this.bakeKey(`stage${st.id}`));
+    this.maps.set('debug', this.bakeKey('debug'));
+    this.maps.set('admin', this.bakeKey('admin'));
+    this.pmrem.dispose();
   }
 
   get(key: string): THREE.Texture {
-    let rt = this.maps.get(key);
-    if (rt) {
-      this.maps.delete(key);
-    } else {
-      rt = this.bakeKey(key);
-      while (this.maps.size >= EnvironmentMaps.KEEP) {
-        const [oldKey, old] = this.maps.entries().next().value!;
-        this.maps.delete(oldKey);
-        old.dispose();
-      }
-    }
-    this.maps.set(key, rt);
-    return rt.texture;
+    return (this.maps.get(key) ?? this.maps.get('stage1')!).texture;
   }
 
-  /** Bake ahead of time (e.g. the next stage) so the switch itself is instant. */
-  prewarm(key: string): void {
-    if (this.maps.has(key)) return;
-    const current = [...this.maps.keys()].pop();
-    this.get(key);
-    if (current) this.get(current); // keep the active one most-recent
-  }
+  /** Kept for API compatibility: everything is pre-baked. */
+  prewarm(_key: string): void {}
 
   private bakeKey(key: string): THREE.WebGLRenderTarget {
     if (key === 'debug') return this.bake('#39ff6a', '#1aff9a', '#010d05', false);
@@ -80,7 +70,7 @@ export class EnvironmentMaps {
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = -3.9;
     scene.add(floor);
-    const rt = this.pmrem.fromScene(scene, 0.035);
+    const rt = this.pmrem.fromScene(scene, 0.035, 0.1, 100, { size: 128 });
     scene.traverse((o) => {
       const m = o as THREE.Mesh;
       m.geometry?.dispose();
