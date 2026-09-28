@@ -6,6 +6,7 @@ import { rimify } from '../utils/rim';
 import { canvasTexture } from '../utils/textures';
 import { damp, clamp } from '../utils/math';
 import type { MaterialLib } from '../render/MaterialLib';
+import type { ModelAvatar } from './ModelAvatar';
 
 /**
  * "Ty" – the AppsByTy developer. Fully procedural, but built like a modern
@@ -260,6 +261,21 @@ export class Character {
   private readonly tmpColor = new THREE.Color();
 
   onFootstep: (side: 0 | 1) => void = () => {};
+  /** Sculpted 3D model driven by this rig (replaces the procedural meshes once loaded). */
+  private avatar: ModelAvatar | null = null;
+
+  /** Swap the procedural body for the real 3D model; the procedural rig keeps driving it. */
+  attachModel(av: ModelAvatar): void {
+    this.body.traverse((o) => {
+      if ((o as THREE.Mesh).isMesh || (o as THREE.Points).isPoints || (o as THREE.Line).isLine) o.visible = false;
+    });
+    this.avatar = av;
+    this.body.add(av.root);
+  }
+
+  get hasModel(): boolean {
+    return this.avatar !== null;
+  }
 
   constructor(lib: MaterialLib) {
     const phys = (p: THREE.MeshPhysicalMaterialParameters, rim: THREE.ColorRepresentation, rs: number, rp = 3): THREE.MeshPhysicalMaterial =>
@@ -539,6 +555,7 @@ export class Character {
   }
 
   getFootWorld(side: 0 | 1, out: THREE.Vector3): THREE.Vector3 {
+    if (this.avatar?.getFootWorld(side, out)) return out;
     return this.j[side === 0 ? 'footL' : 'footR'].localToWorld(out.set(0, -0.07, 0.06));
   }
 
@@ -597,7 +614,8 @@ export class Character {
 
     // ---- run: pelvis yaw, counter-rotating chest, pumping arms, foot roll
     const wr = this.w.run;
-    if (wr > 0.001) {
+    // With the 3D model the run comes from its own motion clip.
+    if (wr > 0.001 && !this.avatar) {
       const p = this.phase;
       const s = Math.sin(p);
       const c = Math.cos(p);
@@ -671,7 +689,7 @@ export class Character {
       add('kneeR', -0.25, 0, 0, wi);
       add('footR', 0.1, 0, 0, wi);
       add('shoulderL', 0.1, 0, -0.1, wi);
-      add('elbowL', 1.5, 0, 0, wi);
+      add('elbowL', this.avatar ? 0.3 : 1.5, 0, 0, wi);
       add('handL', 0, 0, 0, wi);
       add('shoulderR', -0.05, 0, 0.12 + br * 0.02, wi);
       add('elbowR', 0.25, 0, 0, wi);
@@ -728,6 +746,7 @@ export class Character {
     this.body.position.z += (0 - this.body.position.z) * damp(10, dt);
 
     this.secondary(a, dt);
+    this.avatar?.update(this.j, this.w.run, this.phase);
   }
 
   /** Spring-driven cloth and hair: they lag and bounce with body motion. */
@@ -798,5 +817,7 @@ export class Character {
     set('kneeL', -0.9);
     set('kneeR', -0.3);
     this.secondary({ dt, speed: 0, running: false, grounded: true, vy: 0, sliding: false, laneOffset: 0, stumble: 0, dead: true, idle: false }, dt);
+    this.w.run = Math.max(0, this.w.run - dt * 6);
+    this.avatar?.update(this.j, this.w.run, this.phase);
   }
 }

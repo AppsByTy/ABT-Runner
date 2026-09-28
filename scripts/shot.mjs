@@ -8,7 +8,8 @@ const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
 page.on('console', (m) => (m.type() === 'error' || m.type() === 'warning') && !/swiftshader|GPU stall|WebGL/.test(m.text()) && errors.push(m.text()));
 await page.goto(`http://localhost:5173/?seed=3&quality=${process.env.Q ?? 'high'}`, { waitUntil: 'networkidle' });
-await page.waitForFunction(() => window.__game);
+await page.waitForFunction(() => window.__game, null, { timeout: 240000 });
+await page.waitForFunction(() => window.__game.player.character.hasModel, null, { timeout: 120000 }).catch(() => console.log('NO MODEL'));
 const step = (fn, frames) => page.evaluate(([src, frames]) => {
   const g = window.__game; g.autoLoop = false; g.renderEnabled = false;
   new Function('g', src)(g);

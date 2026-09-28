@@ -11,7 +11,8 @@ export default defineConfig({
     target: 'es2020',
     outDir: 'dist',
     // Inline the bundled fonts (single-file / offline builds); keep music files external.
-    assetsInlineLimit: (file: string) => /\.woff2?$/.test(file),
+    // SINGLEFILE=1 also inlines 3D models (for the one-file web preview).
+    assetsInlineLimit: (file: string) => /\.woff2?$/.test(file) || (!!process.env.SINGLEFILE && /\.glb$/.test(file)),
     chunkSizeWarningLimit: 1200,
   },
 });
