@@ -11,7 +11,8 @@ import { rimify } from '../utils/rim';
  *  - Everything else (jump tuck, slide, idle stance, landing, flinch, death)
  *    is retargeted live from the procedural rig: each procedural joint's
  *    local rotation is converted into the model's bone space.
- *  - Lit stylized materials with a fresnel rim for a bold, readable silhouette.
+ *  - A skinned inverted-hull outline gives the bold, readable silhouette of
+ *    premium mobile runners.
  */
 
 /** Procedural joint -> model bone. */
@@ -46,6 +47,10 @@ interface Bound {
   bind: THREE.Quaternion;
 }
 
+const OUTLINE_VERT = /* glsl */ `
+  uniform float uOutline;
+`;
+
 export class ModelAvatar {
   /** Add to the character body group; rotated to face the run direction. */
   readonly root = new THREE.Group();
@@ -60,6 +65,7 @@ export class ModelAvatar {
   private readonly feet: [THREE.Bone | null, THREE.Bone | null];
   /** Stride phase (radians) at which the clip's left foot plants. */
   phaseOffset = 0;
+  readonly outlineUniform = { value: 0.9 };
 
   constructor(gltf: GLTF, albedo: THREE.Texture | null = null) {
     const scene = gltf.scene;
@@ -82,9 +88,10 @@ export class ModelAvatar {
       });
       if (mat.map) {
         mat.map.colorSpace = THREE.SRGBColorSpace;
-        mat.map.anisotropy = 4;
+        mat.map.anisotropy = 8;
       }
       mesh.material = rimify(mat, '#9fe8ff', 0.45, 2.6);
+      if (mesh.isSkinnedMesh) this.addOutline(mesh);
     });
 
     // Bind-pose bookkeeping.
@@ -167,6 +174,26 @@ export class ModelAvatar {
     this.root.scale.setScalar(1.08); // a touch of hero scale for readability
   }
 
+  private addOutline(mesh: THREE.SkinnedMesh): void {
+    const mat = new THREE.MeshBasicMaterial({ color: 0x07070c, side: THREE.BackSide });
+    mat.onBeforeCompile = (shader) => {
+      shader.uniforms.uOutline = this.outlineUniform;
+      shader.vertexShader = OUTLINE_VERT + shader.vertexShader.replace(
+        '#include <skinning_vertex>',
+        '#include <skinning_vertex>\n  transformed += normalize(objectNormal) * uOutline;',
+      );
+    };
+    mat.customProgramCacheKey = () => 'avatar-outline';
+    const outline = new THREE.SkinnedMesh(mesh.geometry, mat);
+    outline.bind(mesh.skeleton, mesh.bindMatrix);
+    outline.frustumCulled = false;
+    outline.renderOrder = -1;
+    mesh.parent!.add(outline);
+    outline.position.copy(mesh.position);
+    outline.quaternion.copy(mesh.quaternion);
+    outline.scale.copy(mesh.scale);
+  }
+
   /**
    * @param joints procedural joint rotations (already smoothed, run excluded)
    * @param runWeight 0..1 blend of the running clip
@@ -230,23 +257,15 @@ async function bytesOf(url: string): Promise<ArrayBuffer> {
 export async function loadAvatar(meshUrl: string, albedoUrl: string): Promise<ModelAvatar> {
   const [meshBuf, texBuf] = await Promise.all([bytesOf(meshUrl), bytesOf(albedoUrl)]);
   const gltf = await new GLTFLoader().parseAsync(meshBuf, '');
-  // Albedo ships as raw 512x512 RGB: no image decoding on the device at all.
-  const rgb = new Uint8Array(texBuf);
-  const size = Math.round(Math.sqrt(rgb.length / 3));
-  const rgba = new Uint8Array(size * size * 4);
-  for (let i = 0, j = 0; i < rgb.length; i += 3, j += 4) {
-    rgba[j] = rgb[i];
-    rgba[j + 1] = rgb[i + 1];
-    rgba[j + 2] = rgb[i + 2];
-    rgba[j + 3] = 255;
+  let albedo: THREE.Texture | null = null;
+  try {
+    const bmp = await createImageBitmap(new Blob([texBuf], { type: 'image/jpeg' }), { imageOrientation: 'none' });
+    albedo = new THREE.Texture(bmp);
+    albedo.flipY = false;
+    albedo.colorSpace = THREE.SRGBColorSpace;
+    albedo.needsUpdate = true;
+  } catch {
+    albedo = null;
   }
-  const albedo = new THREE.DataTexture(rgba, size, size, THREE.RGBAFormat);
-  albedo.colorSpace = THREE.SRGBColorSpace;
-  albedo.flipY = false;
-  albedo.generateMipmaps = true;
-  albedo.minFilter = THREE.LinearMipmapLinearFilter;
-  albedo.magFilter = THREE.LinearFilter;
-  albedo.anisotropy = 4;
-  albedo.needsUpdate = true;
   return new ModelAvatar(gltf, albedo);
 }

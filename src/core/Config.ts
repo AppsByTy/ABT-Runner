@@ -70,7 +70,7 @@ export const CONFIG = {
   camera: {
     fov: 62,
     fovSpeedBoost: 10,
-    offset: { x: 0, y: 3.3, z: 6.4 },
+    offset: { x: 0, y: 3.0, z: 5.7 },
     lookAhead: 7,
     lookHeight: 1.1,
     followX: 0.85,
