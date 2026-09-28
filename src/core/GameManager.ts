@@ -21,7 +21,7 @@ import { PostFX, canRenderHalfFloat } from '../fx/PostFX';
 import { RenderWatchdog, rememberError, showDiagnostics } from '../render/Watchdog';
 import { loadAvatar } from '../game/ModelAvatar';
 import tyMeshUrl from '../assets/models/ty-mesh.glb?inline';
-import tyAlbedoUrl from '../assets/models/ty-albedo.jpg?inline';
+import tyAlbedoUrl from '../assets/models/ty-albedo.rgb?inline';
 import { FXDirector } from '../fx/FXDirector';
 import { HUD } from '../ui/HUD';
 import { audio } from '../audio/AudioManager';
