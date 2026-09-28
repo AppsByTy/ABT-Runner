@@ -10,6 +10,8 @@ import type * as THREE from 'three';
  */
 export class RenderWatchdog {
   readonly errors: string[] = [];
+  /** Error saved by the previous session, if any (shown with ?diag). */
+  previous: string | null = null;
   done = false;
   private dark = 0;
   private good = 0;
@@ -20,6 +22,9 @@ export class RenderWatchdog {
     canvas.addEventListener('webglcontextlost', (e) => {
       e.preventDefault();
       this.log('WebGL context lost');
+      rememberError('WebGL context lost (GPU reset / memory)');
+      // If the browser doesn't hand the GPU back quickly, restart cleanly.
+      window.setTimeout(() => location.reload(), 2500);
     });
     canvas.addEventListener('webglcontextrestored', () => location.reload());
     renderer.debug.onShaderError = (gl, program, vs, fs) => {
@@ -27,8 +32,24 @@ export class RenderWatchdog {
       this.log(`shader error: ${clip(gl.getProgramInfoLog(program))} ${clip(gl.getShaderInfoLog(vs))} ${clip(gl.getShaderInfoLog(fs))}`);
       console.error('[shader]', gl.getProgramInfoLog(program), gl.getShaderInfoLog(vs), gl.getShaderInfoLog(fs));
     };
-    window.addEventListener('error', (e) => this.log(`error: ${e.message}`));
-    window.addEventListener('unhandledrejection', (e) => this.log(`rejection: ${String(e.reason).slice(0, 200)}`));
+    window.addEventListener('error', (e) => {
+      this.log(`error: ${e.message}`);
+      rememberError(`${e.message} @ ${e.filename}:${e.lineno}:${e.colno}`);
+    });
+    window.addEventListener('unhandledrejection', (e) => {
+      this.log(`rejection: ${String(e.reason).slice(0, 200)}`);
+      rememberError(`rejection: ${String(e.reason).slice(0, 200)}`);
+    });
+    // A crash report from the previous session (e.g. the page was killed mid-run)?
+    try {
+      const last = localStorage.getItem(CRASH_KEY);
+      if (last) {
+        localStorage.removeItem(CRASH_KEY);
+        this.previous = last;
+      }
+    } catch {
+      /* storage unavailable */
+    }
   }
 
   log(msg: string): void {
@@ -64,6 +85,17 @@ export class RenderWatchdog {
   }
 }
 
+const CRASH_KEY = 'coderunner.lastError.v1';
+
+/** Persist the latest error so it survives a page crash/reload (read back via ?diag). */
+export function rememberError(msg: string): void {
+  try {
+    localStorage.setItem(CRASH_KEY, `${new Date().toISOString()} ${msg}`.slice(0, 800));
+  } catch {
+    /* ignore */
+  }
+}
+
 /** Small copy-able diagnostics panel (shown with ?diag, or if the 3D view can't be recovered). */
 export function showDiagnostics(renderer: THREE.WebGLRenderer, lines: string[]): void {
   let el = document.getElementById('diag');
@@ -76,6 +108,7 @@ export function showDiagnostics(renderer: THREE.WebGLRenderer, lines: string[]):
       'padding:10px 12px;border-radius:12px;background:rgba(0,0,0,.82);border:1px solid rgba(255,80,110,.6);color:#ffd6de;' +
       'font:11px/1.45 ui-monospace,Menlo,monospace;white-space:pre-wrap;user-select:text;-webkit-user-select:text;pointer-events:auto';
     document.body.appendChild(el);
+    el.addEventListener('click', () => el!.remove());
   }
   const gl = renderer.getContext();
   const dbg = gl.getExtension('WEBGL_debug_renderer_info');

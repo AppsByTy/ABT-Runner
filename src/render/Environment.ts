@@ -9,22 +9,48 @@ import { STAGES } from '../core/Theme';
  * as real materials instead of flat plastic.
  */
 export class EnvironmentMaps {
-  private readonly maps = new Map<string, THREE.Texture>();
+  /** Baked maps, most recently used last. Only a few are kept on the GPU at once (phone memory). */
+  private readonly maps = new Map<string, THREE.WebGLRenderTarget>();
   private readonly pmrem: THREE.PMREMGenerator;
+  private static readonly KEEP = 3;
 
   constructor(renderer: THREE.WebGLRenderer) {
     this.pmrem = new THREE.PMREMGenerator(renderer);
-    for (const st of STAGES) this.maps.set(`stage${st.id}`, this.bake(st.primary, st.secondary, st.void, st.id === 7));
-    this.maps.set('debug', this.bake('#39ff6a', '#1aff9a', '#010d05', false));
-    this.maps.set('admin', this.bake('#ffd23a', '#fff1b0', '#140d02', true));
-    this.pmrem.dispose();
+    this.get('stage1');
   }
 
   get(key: string): THREE.Texture {
-    return this.maps.get(key) ?? this.maps.get('stage1')!;
+    let rt = this.maps.get(key);
+    if (rt) {
+      this.maps.delete(key);
+    } else {
+      rt = this.bakeKey(key);
+      while (this.maps.size >= EnvironmentMaps.KEEP) {
+        const [oldKey, old] = this.maps.entries().next().value!;
+        this.maps.delete(oldKey);
+        old.dispose();
+      }
+    }
+    this.maps.set(key, rt);
+    return rt.texture;
   }
 
-  private bake(primary: string, secondary: string, voidColor: string, core: boolean): THREE.Texture {
+  /** Bake ahead of time (e.g. the next stage) so the switch itself is instant. */
+  prewarm(key: string): void {
+    if (this.maps.has(key)) return;
+    const current = [...this.maps.keys()].pop();
+    this.get(key);
+    if (current) this.get(current); // keep the active one most-recent
+  }
+
+  private bakeKey(key: string): THREE.WebGLRenderTarget {
+    if (key === 'debug') return this.bake('#39ff6a', '#1aff9a', '#010d05', false);
+    if (key === 'admin') return this.bake('#ffd23a', '#fff1b0', '#140d02', true);
+    const st = STAGES.find((s) => `stage${s.id}` === key) ?? STAGES[0];
+    return this.bake(st.primary, st.secondary, st.void, st.id === 7);
+  }
+
+  private bake(primary: string, secondary: string, voidColor: string, core: boolean): THREE.WebGLRenderTarget {
     const scene = new THREE.Scene();
     const shell = new THREE.Mesh(
       new THREE.BoxGeometry(40, 20, 40),
@@ -60,6 +86,6 @@ export class EnvironmentMaps {
       m.geometry?.dispose();
       (m.material as THREE.Material | undefined)?.dispose();
     });
-    return rt.texture;
+    return rt;
   }
 }

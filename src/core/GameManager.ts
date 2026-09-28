@@ -18,7 +18,7 @@ import { ObstacleManager, KIND_LABEL, isBadBug, type Obstacle, type ObstacleKind
 import { PickupManager, POWER_INFO, type Pickup, type PowerType } from '../world/Pickups';
 import { Spawner } from '../world/Spawner';
 import { PostFX, canRenderHalfFloat } from '../fx/PostFX';
-import { RenderWatchdog, showDiagnostics } from '../render/Watchdog';
+import { RenderWatchdog, rememberError, showDiagnostics } from '../render/Watchdog';
 import { loadAvatar } from '../game/ModelAvatar';
 import tyMeshUrl from '../assets/models/ty-mesh.glb?inline';
 import tyAlbedoUrl from '../assets/models/ty-albedo.jpg?inline';
@@ -87,6 +87,7 @@ export class GameManager {
   readonly post: PostFX;
   private readonly watchdog: RenderWatchdog;
   private recoverStep = 0;
+  private prewarmed = 0;
   readonly fx: FXDirector;
   readonly hud: HUD;
 
@@ -271,12 +272,18 @@ export class GameManager {
       })
       .catch((e) => this.watchdog.log(`model: ${String(e).slice(0, 160)}`));
     window.setTimeout(() => void this.renderer.compileAsync(this.scene, this.cam.camera).catch(() => {}), 600);
+    // If the previous session died with an error, show the report once so it can be screenshotted.
+    if (this.watchdog.previous) {
+      showDiagnostics(this.renderer, [`LAST SESSION CRASHED: ${this.watchdog.previous}`, 'Tap this box to close.']);
+    }
     if (new URLSearchParams(location.search).has('diag')) {
       window.setInterval(
         () =>
           showDiagnostics(this.renderer, [
             `quality ${this.quality.level} · post level ${this.post.safeLevel} · halfFloat ${canRenderHalfFloat(this.renderer)} · reflections ${!!this.reflection} · shadows ${this.renderer.shadowMap.enabled}`,
             `pixelRatio ${this.pixelRatio} · calls ${this.renderer.info.render.calls} · watchdog ${this.watchdog.done ? 'ok' : 'checking'}`,
+            ...(this.watchdog.previous ? [`previous session: ${this.watchdog.previous}`] : []),
+            `jsHeap ${Math.round(((performance as unknown as { memory?: { usedJSHeapSize: number } }).memory?.usedJSHeapSize ?? 0) / 1e6)}MB · geo ${this.renderer.info.memory.geometries} · tex ${this.renderer.info.memory.textures}`,
             ...this.watchdog.errors,
           ]),
         1000,
@@ -498,11 +505,23 @@ export class GameManager {
   // ------------------------------------------------------------------ loop
 
   run(): void {
+    let errors = 0;
     const frame = (now: number): void => {
+      // Always keep the loop alive: one bad frame must never freeze the game.
+      requestAnimationFrame(frame);
       const dt = Math.min((now - this.lastFrame) / 1000, 0.1);
       this.lastFrame = now;
-      if (this.autoLoop) this.frame(dt);
-      requestAnimationFrame(frame);
+      if (!this.autoLoop) return;
+      try {
+        this.frame(dt);
+      } catch (e) {
+        errors++;
+        const msg = e instanceof Error ? `${e.message} @ ${(e.stack ?? '').split('\n').slice(0, 3).join(' | ')}` : String(e);
+        this.watchdog.log(`frame error: ${msg.slice(0, 300)}`);
+        rememberError(msg);
+        console.error(e);
+        if (errors === 30) showDiagnostics(this.renderer, this.watchdog.errors);
+      }
     };
     requestAnimationFrame(frame);
   }
@@ -922,6 +941,12 @@ export class GameManager {
     this.key.target.position.set(px, 0, -8);
     this.shadowCatcher.position.x = px;
 
+    // Bake the next stage's lighting a little before we get there (no hitch at the switch).
+    const next = STAGES[this.stage.id];
+    if (playing && next && this.distance > next.at - 120 && this.prewarmed !== next.id) {
+      this.prewarmed = next.id;
+      this.envMaps.prewarm(`stage${next.id}`);
+    }
     const want = mode === 'debug' ? 'debug' : mode === 'admin' ? 'admin' : `stage${this.stage.id}`;
     if (want !== this.envKey) {
       this.envKey = want;
