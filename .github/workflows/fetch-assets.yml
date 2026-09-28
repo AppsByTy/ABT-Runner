@@ -1,0 +1,38 @@
+# Downloads generated 3D models listed in art/models.json into public/models/
+# (optimised for mobile) and commits them. Runs when the manifest changes.
+name: fetch-assets
+on:
+  push:
+    paths: ['art/models.json']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - name: Download + optimise
+        run: |
+          mkdir -p public/models art/raw
+          for row in $(jq -c '.[]' art/models.json); do
+            name=$(echo "$row" | jq -r .name); url=$(echo "$row" | jq -r .url)
+            [ -f "art/raw/$name.glb" ] && [ "$(echo "$row" | jq -r '.force // false')" != "true" ] && continue
+            curl -fsSL "$url" -o "art/raw/$name.glb"
+            ls -la "art/raw/$name.glb"
+          done
+          for f in art/raw/*.glb; do
+            n=$(basename "$f" .glb)
+            npx -y @gltf-transform/cli@4 optimize "$f" "public/models/$n.glb" --compress meshopt --texture-compress webp --texture-size 1024 --simplify false || cp "$f" "public/models/$n.glb"
+            npx -y @gltf-transform/cli@4 inspect "public/models/$n.glb" > "public/models/$n.txt" 2>&1 || true
+          done
+          ls -la public/models
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git add public/models art/raw
+          git diff --cached --quiet || git commit -m "Fetch generated 3D models"
+          git push
