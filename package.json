@@ -11,7 +11,10 @@
     "test:play": "node scripts/playtest.mjs",
     "test:bot": "node scripts/bot.mjs",
     "test:scenarios": "node scripts/scenarios.mjs",
-    "test:shots": "node scripts/shot.mjs shots"
+    "test:shots": "node scripts/shot.mjs shots",
+    "test:gpu-reset": "node scripts/check-gpu-reset.mjs",
+    "test:stalls": "node scripts/check-shader-stalls.mjs",
+    "build:single": "node scripts/build-single.mjs"
   },
   "devDependencies": {
     "@types/three": "^0.186.0",

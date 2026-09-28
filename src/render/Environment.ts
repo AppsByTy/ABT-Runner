@@ -16,10 +16,26 @@ export class EnvironmentMaps {
    * changes or a power-up starts.
    */
   private readonly maps = new Map<string, THREE.WebGLRenderTarget>();
-  private readonly pmrem: THREE.PMREMGenerator;
+  private readonly renderer: THREE.WebGLRenderer;
+  private pmrem!: THREE.PMREMGenerator;
 
   constructor(renderer: THREE.WebGLRenderer) {
-    this.pmrem = new THREE.PMREMGenerator(renderer);
+    this.renderer = renderer;
+    this.bakeAll();
+  }
+
+  /**
+   * Re-bake every map. Baked maps live only on the GPU, so their pixels are
+   * gone after a WebGL context loss; call this once the context is restored.
+   */
+  rebuild(): void {
+    for (const rt of this.maps.values()) rt.dispose();
+    this.maps.clear();
+    this.bakeAll();
+  }
+
+  private bakeAll(): void {
+    this.pmrem = new THREE.PMREMGenerator(this.renderer);
     for (const st of STAGES) this.maps.set(`stage${st.id}`, this.bakeKey(`stage${st.id}`));
     this.maps.set('debug', this.bakeKey('debug'));
     this.maps.set('admin', this.bakeKey('admin'));

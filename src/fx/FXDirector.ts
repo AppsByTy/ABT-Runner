@@ -19,13 +19,25 @@ const CYAN = '#00e5ff';
 const GOLD = '#ffd23a';
 const RED = '#ff2a4a';
 
+type BurstKind = 'ring' | 'check' | 'beam';
+
+/**
+ * A pooled one-shot 3D effect. Meshes and materials are created once at
+ * startup and recycled: creating a material per effect and disposing it
+ * afterwards made the GPU compile (and throw away) a shader in the middle of
+ * the run on every power-up, pickup and deleted bug.
+ */
 interface Burst3D {
   mesh: THREE.Mesh;
+  mat: THREE.MeshBasicMaterial;
   t: number;
   life: number;
-  z: number;
-  kind: 'ring' | 'check' | 'beam';
+  active: boolean;
+  /** ring: final scale; beam: length. */
+  size: number;
 }
+
+const POOL: Record<BurstKind, number> = { ring: 14, check: 10, beam: 8 };
 
 /**
  * Turns gameplay events into feedback: particles, sneaker trails, speed
@@ -50,8 +62,7 @@ export class FXDirector {
   private readonly shieldU = { uTime: THEME.uTime, uHit: { value: 0 }, uOn: { value: 0 } };
   private readonly halo: THREE.Points;
   private readonly haloU = { uTime: THEME.uTime, uColor: { value: new THREE.Color(GREEN) }, uOn: { value: 0 }, uGlyphs: { value: glyphAtlas() }, uScale: { value: 500 } };
-  private readonly bursts: Burst3D[] = [];
-  private readonly ringGeo = new THREE.RingGeometry(0.7, 0.85, 40);
+  private readonly pools: Record<BurstKind, Burst3D[]> = { ring: [], check: [], beam: [] };
   private readonly checkTex: THREE.CanvasTexture;
   private readonly scene: THREE.Scene;
   private haloTarget = 0;
@@ -162,6 +173,7 @@ export class FXDirector {
       ctx.lineTo(104, 34);
       ctx.stroke();
     });
+    this.buildPools();
 
     const p = this.particles;
     player.character.onFootstep = (side) => events.emit('footstep', { side });
@@ -309,16 +321,49 @@ export class FXDirector {
 
   // ------------------------------------------------------------ 3D bursts
 
+  /** Create every pooled effect up front (hidden, in the scene) so its shader is pre-compiled. */
+  private buildPools(): void {
+    const additive = { transparent: true, depthWrite: false, blending: THREE.AdditiveBlending } as const;
+    const ringGeo = new THREE.RingGeometry(0.7, 0.85, 40);
+    const checkGeo = new THREE.PlaneGeometry(0.9, 0.9);
+    // Unit-length open cone, scaled along Y to the beam length.
+    const beamGeo = new THREE.CylinderGeometry(0.08, 0.2, 1, 6, 1, true);
+    const make: Record<BurstKind, () => [THREE.BufferGeometry, THREE.MeshBasicMaterial]> = {
+      ring: () => [ringGeo, new THREE.MeshBasicMaterial({ ...additive, side: THREE.DoubleSide })],
+      check: () => [checkGeo, new THREE.MeshBasicMaterial({ ...additive, map: this.checkTex, color: new THREE.Color(1.6, 1.6, 1.6) })],
+      beam: () => [beamGeo, new THREE.MeshBasicMaterial({ ...additive })],
+    };
+    for (const kind of Object.keys(POOL) as BurstKind[]) {
+      for (let i = 0; i < POOL[kind]; i++) {
+        const [geo, mat] = make[kind]();
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.visible = false;
+        if (kind === 'ring') mesh.rotation.x = -Math.PI / 2;
+        this.scene.add(mesh);
+        this.pools[kind].push({ mesh, mat, t: 0, life: 1, active: false, size: 1 });
+      }
+    }
+  }
+
+  /** A free pooled effect, or the one closest to finishing if all are busy. */
+  private take(kind: BurstKind, life: number, t = 0): Burst3D {
+    const pool = this.pools[kind];
+    let b = pool.find((x) => !x.active);
+    if (!b) b = pool.reduce((a, x) => (x.t / x.life > a.t / a.life ? x : a));
+    b.active = true;
+    b.t = t;
+    b.life = life;
+    b.mat.opacity = 1;
+    b.mesh.visible = t >= 0;
+    return b;
+  }
+
   private ring(x: number, y: number, z: number, color: string, size: number): void {
-    const mesh = new THREE.Mesh(
-      this.ringGeo,
-      new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(2), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }),
-    );
-    mesh.rotation.x = -Math.PI / 2;
-    mesh.position.set(x, y, z);
-    mesh.userData.size = size;
-    this.scene.add(mesh);
-    this.bursts.push({ mesh, t: 0, life: 0.5, z, kind: 'ring' });
+    const b = this.take('ring', 0.5);
+    b.mat.color.set(color).multiplyScalar(2);
+    b.mesh.position.set(x, y, z);
+    b.mesh.scale.setScalar(0.3);
+    b.size = size;
   }
 
   private beatGlow = 0;
@@ -362,53 +407,48 @@ export class FXDirector {
   }
 
   private check(x: number, y: number, z: number, delay = 0): void {
-    const mesh = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.9, 0.9),
-      new THREE.MeshBasicMaterial({ map: this.checkTex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, color: new THREE.Color(1.6, 1.6, 1.6) }),
-    );
-    mesh.position.set(x, y, z);
-    this.scene.add(mesh);
-    this.bursts.push({ mesh, t: -delay, life: 0.8, z, kind: 'check' });
+    const b = this.take('check', 0.8, -delay);
+    b.mesh.position.set(x, y, z);
+    b.mesh.scale.setScalar(0.001);
   }
 
+  private readonly beamTo = new THREE.Vector3();
+  private readonly up = new THREE.Vector3(0, 1, 0);
+
   private beam(from: THREE.Vector3, x: number, z: number, color = RED, y = 0): void {
-    const to = new THREE.Vector3(x, y, z);
-    const len = from.distanceTo(to);
-    const mesh = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.08, 0.2, len, 6, 1, true),
-      new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(2), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }),
-    );
-    mesh.position.copy(from).add(to).multiplyScalar(0.5);
-    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), to.clone().sub(from).normalize());
-    this.scene.add(mesh);
-    this.bursts.push({ mesh, t: 0, life: 0.35, z: mesh.position.z, kind: 'beam' });
+    const to = this.beamTo.set(x, y, z);
+    const b = this.take('beam', 0.35);
+    b.size = from.distanceTo(to);
+    b.mat.color.set(color).multiplyScalar(2);
+    b.mesh.position.copy(from).add(to).multiplyScalar(0.5);
+    b.mesh.quaternion.setFromUnitVectors(this.up, to.sub(from).normalize());
+    b.mesh.scale.set(1, b.size, 1);
   }
 
   private updateBursts(dt: number, scroll: number): void {
-    for (let i = this.bursts.length - 1; i >= 0; i--) {
-      const b = this.bursts[i];
-      b.t += dt;
-      const k = Math.max(0, b.t / b.life);
-      const mat = b.mesh.material as THREE.MeshBasicMaterial;
-      b.mesh.visible = b.t >= 0;
-      if (k >= 1) {
-        this.scene.remove(b.mesh);
-        mat.dispose();
-        if (b.kind !== 'ring') b.mesh.geometry.dispose();
-        this.bursts.splice(i, 1);
-        continue;
-      }
-      if (b.kind === 'ring') b.mesh.position.z += scroll;
-      if (b.kind === 'ring') {
-        b.mesh.scale.setScalar(0.3 + k * (b.mesh.userData.size as number));
-        mat.opacity = 1 - k;
-      } else if (b.kind === 'check') {
-        b.mesh.position.y += dt * 1.4;
-        b.mesh.scale.setScalar(k < 0.2 ? k * 6 : 1.2 - (k - 0.2) * 0.3);
-        mat.opacity = k < 0.6 ? 1 : 1 - (k - 0.6) / 0.4;
-      } else {
-        mat.opacity = 1 - k;
-        b.mesh.scale.set(1 - k * 0.8, 1, 1 - k * 0.8);
+    for (const kind of Object.keys(this.pools) as BurstKind[]) {
+      for (const b of this.pools[kind]) {
+        if (!b.active) continue;
+        b.t += dt;
+        const k = Math.max(0, b.t / b.life);
+        b.mesh.visible = b.t >= 0;
+        if (k >= 1) {
+          b.active = false;
+          b.mesh.visible = false;
+          continue;
+        }
+        if (kind === 'ring') {
+          b.mesh.position.z += scroll;
+          b.mesh.scale.setScalar(0.3 + k * b.size);
+          b.mat.opacity = 1 - k;
+        } else if (kind === 'check') {
+          b.mesh.position.y += dt * 1.4;
+          b.mesh.scale.setScalar(Math.max(0.001, k < 0.2 ? k * 6 : 1.2 - (k - 0.2) * 0.3));
+          b.mat.opacity = k < 0.6 ? 1 : 1 - (k - 0.6) / 0.4;
+        } else {
+          b.mat.opacity = 1 - k;
+          b.mesh.scale.set(1 - k * 0.8, b.size, 1 - k * 0.8);
+        }
       }
     }
   }
@@ -417,8 +457,12 @@ export class FXDirector {
     this.particles.clear();
     this.dark.clear();
     for (const t of this.trails) t.reset();
-    for (const b of this.bursts) this.scene.remove(b.mesh);
-    this.bursts.length = 0;
+    for (const pool of Object.values(this.pools)) {
+      for (const b of pool) {
+        b.active = false;
+        b.mesh.visible = false;
+      }
+    }
     this.haloTarget = 0;
     this.haloU.uOn.value = 0;
   }

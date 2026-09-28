@@ -65,6 +65,11 @@ export class PostFX {
     return this.q.post && this.safeLevel < 3;
   }
 
+  /** Off-screen target the scene is drawn into (null when drawing straight to the screen). */
+  get sceneTarget(): THREE.WebGLRenderTarget | null {
+    return this.enabled && this.composer ? this.composer.readBuffer : null;
+  }
+
   /** Step down to a more compatible post chain (black-screen watchdog). Returns false when nothing is left. */
   fallback(): boolean {
     if (!this.enabled) return false;

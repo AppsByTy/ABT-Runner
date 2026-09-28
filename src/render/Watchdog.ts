@@ -5,28 +5,42 @@ import type * as THREE from 'three';
  * the render pipeline (typically iOS: half-float / multisampled targets, or a
  * shader producing NaNs). For the first seconds it samples a few pixels of
  * the finished frame; if the frame keeps coming out pure black it asks the
- * game to step down (see GameManager.recoverBlackScreen). Also collects
- * shader / WebGL errors for the on-screen diagnostics panel.
+ * game to step down (see GameManager.recoverBlackScreen).
+ *
+ * It also reports GPU context loss / restoration to the game (which pauses
+ * and rebuilds its GPU resources in place - the page is never reloaded) and
+ * keeps a tiny flight recorder so a session the OS kills can be explained on
+ * the next launch.
  */
 export class RenderWatchdog {
   readonly errors: string[] = [];
-  /** Error saved by the previous session, if any (shown with ?diag). */
+  /** What ended the previous session abnormally, if anything (shown once at launch). */
   previous: string | null = null;
   done = false;
+  /** GPU context dropped by the browser/OS; the game must stop drawing until restored. */
+  onContextLost: () => void = () => {};
+  /** GPU context is back; the game must rebuild GPU-only content (baked maps). */
+  onContextRestored: () => void = () => {};
   private dark = 0;
   private good = 0;
   private readonly px = new Uint8Array(4);
+  private readonly flight: FlightRecorder;
 
   constructor(renderer: THREE.WebGLRenderer) {
     const canvas = renderer.domElement;
+    this.flight = new FlightRecorder();
     canvas.addEventListener('webglcontextlost', (e) => {
+      // preventDefault tells the browser we will handle restoration.
       e.preventDefault();
       this.log('WebGL context lost');
-      rememberError('WebGL context lost (GPU reset / memory)');
-      // If the browser doesn't hand the GPU back quickly, restart cleanly.
-      window.setTimeout(() => location.reload(), 2500);
+      this.flight.note('gpu-lost');
+      this.onContextLost();
     });
-    canvas.addEventListener('webglcontextrestored', () => location.reload());
+    canvas.addEventListener('webglcontextrestored', () => {
+      this.log('WebGL context restored');
+      this.flight.note('gpu-restored');
+      this.onContextRestored();
+    });
     renderer.debug.onShaderError = (gl, program, vs, fs) => {
       const clip = (t: string | null): string => (t ?? '').trim().slice(0, 300);
       this.log(`shader error: ${clip(gl.getProgramInfoLog(program))} ${clip(gl.getShaderInfoLog(vs))} ${clip(gl.getShaderInfoLog(fs))}`);
@@ -40,20 +54,29 @@ export class RenderWatchdog {
       this.log(`rejection: ${String(e.reason).slice(0, 200)}`);
       rememberError(`rejection: ${String(e.reason).slice(0, 200)}`);
     });
-    // A crash report from the previous session (e.g. the page was killed mid-run)?
+    // An error report / abnormal end from the previous session?
+    const reports: string[] = [];
     try {
       const last = localStorage.getItem(CRASH_KEY);
       if (last) {
         localStorage.removeItem(CRASH_KEY);
-        this.previous = last;
+        reports.push(last);
       }
     } catch {
       /* storage unavailable */
     }
+    const ended = this.flight.previousEnding();
+    if (ended) reports.push(ended);
+    if (reports.length) this.previous = reports.join('\n');
   }
 
   log(msg: string): void {
     if (this.errors.length < 12) this.errors.push(msg);
+  }
+
+  /** Heartbeat for the flight recorder (call about once per second). */
+  heartbeat(state: string, distance: number, fps: number): void {
+    this.flight.beat(state, distance, fps);
   }
 
   /**
@@ -86,6 +109,82 @@ export class RenderWatchdog {
 }
 
 const CRASH_KEY = 'coderunner.lastError.v1';
+const FLIGHT_KEY = 'coderunner.flight.v1';
+
+interface Flight {
+  at: string;
+  state: string;
+  d: number;
+  fps: number;
+  /** Last GPU event: '' | 'gpu-lost' | 'gpu-restored'. */
+  gpu: string;
+  closed: boolean;
+}
+
+/**
+ * Minimal flight recorder: a heartbeat in localStorage while the game runs,
+ * marked closed when the page is left normally. If the next launch finds an
+ * unclosed record, the previous page was killed (by iOS, usually for memory)
+ * or lost its GPU context - which is otherwise indistinguishable from the
+ * outside because both look like "the game reloaded".
+ */
+class FlightRecorder {
+  private rec: Flight = { at: '', state: 'boot', d: 0, fps: 0, gpu: '', closed: false };
+  private prev: Flight | null = null;
+
+  constructor() {
+    try {
+      const raw = localStorage.getItem(FLIGHT_KEY);
+      this.prev = raw ? (JSON.parse(raw) as Flight) : null;
+    } catch {
+      this.prev = null;
+    }
+    this.write();
+    const close = (): void => {
+      this.rec.closed = true;
+      this.write();
+    };
+    const open = (): void => {
+      this.rec.closed = false;
+      this.write();
+    };
+    // Leaving the page or backgrounding the app is a normal end (iOS may
+    // discard a background tab later - that is not a crash).
+    window.addEventListener('pagehide', close);
+    window.addEventListener('pageshow', open);
+    document.addEventListener('visibilitychange', () => (document.hidden ? close() : open()));
+  }
+
+  previousEnding(): string | null {
+    const p = this.prev;
+    if (!p || p.closed) return null;
+    const where = `${p.state === 'playing' ? 'mid-run' : `in ${p.state}`} at ${Math.round(p.d)} m, ${p.fps} fps (${p.at})`;
+    if (p.gpu === 'gpu-lost') return `GPU context lost and not restored ${where}`;
+    if (p.state === 'boot') return null;
+    return `page was killed by the system ${where}${p.gpu === 'gpu-restored' ? ' after a GPU reset' : ''}`;
+  }
+
+  beat(state: string, d: number, fps: number): void {
+    this.rec.state = state;
+    this.rec.d = d;
+    this.rec.fps = Math.round(fps);
+    this.write();
+  }
+
+  note(gpu: string): void {
+    this.rec.gpu = gpu;
+    this.write();
+  }
+
+  private write(): void {
+    this.rec.at = new Date().toISOString();
+    try {
+      localStorage.setItem(FLIGHT_KEY, JSON.stringify(this.rec));
+    } catch {
+      /* storage unavailable */
+    }
+  }
+}
 
 /** Persist the latest error so it survives a page crash/reload (read back via ?diag). */
 export function rememberError(msg: string): void {

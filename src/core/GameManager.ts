@@ -88,6 +88,10 @@ export class GameManager {
   private readonly watchdog: RenderWatchdog;
   private recoverStep = 0;
   private prewarmed = 0;
+  /** The browser took the WebGL context away; nothing is drawn until it is restored. */
+  private gpuLost = false;
+  private beatTime = 0;
+  private fpsCount = 0;
   readonly fx: FXDirector;
   readonly hud: HUD;
 
@@ -262,16 +266,19 @@ export class GameManager {
     audio.startMusic();
     audio.onBeat = (kind) => this.fx.onBeat(kind, this.powers.mode, this.state === GameState.Playing, this.multiplier);
     audio.setIntensity(0);
+    // GPU context loss (iOS GPU reset): pause, then rebuild in place - never reload.
+    this.watchdog.onContextLost = () => this.onContextLost();
+    this.watchdog.onContextRestored = () => this.onContextRestored();
     // Pre-compile every shader (incl. pooled, not-yet-visible hazards, bosses
-    // and power-ups) during the menu so nothing hitches mid-run.
+    // and power-ups) during the menu so nothing compiles mid-run.
     // Sculpted 3D runner model (falls back to the procedural character if it can't load).
     loadAvatar(tyMeshUrl, tyAlbedoUrl)
       .then((av) => {
         this.player.character.attachModel(av);
-        if (this.renderEnabled) void this.renderer.compileAsync(this.scene, this.cam.camera).catch(() => {});
+        this.warmShaders();
       })
       .catch((e) => this.watchdog.log(`model: ${String(e).slice(0, 160)}`));
-    window.setTimeout(() => void this.renderer.compileAsync(this.scene, this.cam.camera).catch(() => {}), 600);
+    window.setTimeout(() => this.warmShaders(), 600);
     // If the previous session died with an error, show the report once so it can be screenshotted.
     if (this.watchdog.previous) {
       showDiagnostics(this.renderer, [`LAST SESSION CRASHED: ${this.watchdog.previous}`, 'Tap this box to close.']);
@@ -448,7 +455,7 @@ export class GameManager {
   }
 
   resume(): void {
-    if (this.state !== GameState.Paused) return;
+    if (this.state !== GameState.Paused || this.gpuLost) return;
     this.lastFrame = performance.now();
     this.setState(GameState.Playing);
   }
@@ -632,7 +639,14 @@ export class GameManager {
     this.post.dof += ((menuish ? 1 : 0) - this.post.dof) * Math.min(1, realDt * 3);
     this.post.focus = this.cam.camera.position.distanceTo(this.player.root.position) + 0.2;
 
-    if (this.renderEnabled) {
+    this.beatTime += realDt;
+    if (this.beatTime >= 1) {
+      this.watchdog.heartbeat(this.state, this.distance, this.fpsCount / this.beatTime);
+      this.beatTime = this.fpsCount = 0;
+    }
+    this.fpsCount++;
+
+    if (this.renderEnabled && !this.gpuLost) {
       this.renderer.shadowMap.needsUpdate = true;
       if (this.reflection) {
         this.reflection.render(this.renderer, this.scene, this.cam.camera, [this.track.group, this.shadowCatcher]);
@@ -970,6 +984,93 @@ export class GameManager {
         this.glitchTimer = 7 + Math.random() * 9 - st.glitch * 30;
       }
     }
+  }
+
+  /**
+   * Compile every material in the scene - including hidden pooled effects,
+   * the boss and power-up visuals - as the variant it is actually drawn with.
+   * Shader variants depend on the render target (off-screen HDR targets skip
+   * tone mapping), so compiling against the screen would build the wrong ones
+   * and leave the real ones to compile mid-run.
+   */
+  private warmShaders(): void {
+    if (!this.renderEnabled || this.gpuLost) return;
+    const r = this.renderer;
+    const prev = r.getRenderTarget();
+    const targets: (THREE.WebGLRenderTarget | null)[] = [this.post.sceneTarget];
+    if (!this.post.sceneTarget && this.reflection) targets.push(this.reflection.target);
+    const ready: Promise<unknown>[] = [];
+    for (const t of targets) {
+      r.setRenderTarget(t);
+      ready.push(r.compileAsync(this.scene, this.cam.camera));
+    }
+    r.setRenderTarget(prev);
+    void Promise.all(ready).then(() => this.warmDraw());
+  }
+
+  /**
+   * Draw everything that is currently hidden (pooled effects, power-up
+   * visuals, the boss, empty instanced pools) once, off-screen. A compiled
+   * shader still needs GPU pipeline state for each blend/cull/target setup it
+   * is drawn with, and the GPU builds that on first draw - so do the first
+   * draw now, in the menu, instead of on the first power-up of the run.
+   */
+  private warmDraw(): void {
+    if (!this.renderEnabled || this.gpuLost) return;
+    const hidden: THREE.Object3D[] = [];
+    const culled: THREE.Object3D[] = [];
+    const empty: THREE.InstancedMesh[] = [];
+    this.scene.traverse((o) => {
+      if (!o.visible) {
+        o.visible = true;
+        hidden.push(o);
+      }
+      if (o.frustumCulled) {
+        o.frustumCulled = false;
+        culled.push(o);
+      }
+      const im = o as THREE.InstancedMesh;
+      if (im.isInstancedMesh && im.count === 0) {
+        im.count = 1;
+        empty.push(im);
+      }
+    });
+    const r = this.renderer;
+    const prev = r.getRenderTarget();
+    try {
+      r.shadowMap.needsUpdate = true;
+      this.reflection?.render(r, this.scene, this.cam.camera, [this.track.group, this.shadowCatcher]);
+      r.setRenderTarget(this.post.sceneTarget ?? this.reflection?.target ?? null);
+      r.render(this.scene, this.cam.camera);
+    } finally {
+      r.setRenderTarget(prev);
+      for (const o of hidden) o.visible = false;
+      for (const o of culled) o.frustumCulled = true;
+      for (const im of empty) im.count = 0;
+    }
+  }
+
+  /** The GPU dropped the context (iOS GPU reset / memory pressure). */
+  private onContextLost(): void {
+    this.gpuLost = true;
+    this.pause();
+    this.hud.banner('GRAPHICS RESET', 'RESTORING…', 'orange', 3);
+    window.setTimeout(() => {
+      if (this.gpuLost) showDiagnostics(this.renderer, ['The graphics driver did not come back.', ...this.watchdog.errors]);
+    }, 10000);
+  }
+
+  /**
+   * Context is back. three.js re-creates its GL objects lazily from the data
+   * it still holds (geometry, textures, render targets); only content that
+   * existed solely on the GPU - the baked lighting - has to be rebuilt.
+   */
+  private onContextRestored(): void {
+    this.gpuLost = false;
+    this.envMaps.rebuild();
+    this.scene.environment = this.envMaps.get(this.envKey);
+    this.warmShaders();
+    this.hud.banner('GRAPHICS RESTORED', this.state === GameState.Paused ? 'TAP TO RESUME' : '', 'green', 1.6);
   }
 
   /**

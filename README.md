@@ -26,6 +26,16 @@ game switches the failing effect off so the game is visible instead of black.
   alpha-blended layer for virus smoke. Bug fixes assemble a checkmark out of particles.
 - Cinematic camera: handheld drift, speed FOV, lower/livelier in DEBUG / ADMIN, a look-up shot when the virus arrives.
 
+Stability on phones:
+
+- **No GPU work is created mid-run.** Every shader is compiled for the render target it is really drawn into, and
+  every hidden effect (power-up rings, bug-fix checkmarks, boss beams, halo, shield, the virus) is drawn once
+  off-screen in the menu. One-shot effects are pooled, never created/destroyed per event.
+- **GPU reset recovery.** If iOS drops the WebGL context, the run pauses, graphics are rebuilt in place (baked
+  lighting re-baked) and you resume where you were. The page is never reloaded.
+- **Flight recorder.** If the system kills the page mid-run, the next launch shows a short report (distance, FPS,
+  whether the GPU had reset) so the cause is known.
+
 ## Music & sound
 
 - **Original procedural hip-hop soundtrack** (`src/audio/HipHopEngine.ts`): 808s with glides, punchy kicks, flammed
@@ -61,6 +71,9 @@ npm run test:play       # fairness solver (40 seeds x 9 km) + keyboard/touch con
 npm run test:scenarios  # 15 scripted checks: dodge/jump/slide, near misses, damage, power-ups, boss, crash
 npm run test:bot        # lockstep autopilot across 24 seeds, prints balance stats
 npm run test:shots      # screenshots of key moments into shots/
+npm run test:gpu-reset  # a GPU reset mid-run must pause + recover in place, never reload
+npm run test:stalls     # no shader may compile or be thrown away during a run (slow on a software GPU)
+npm run build:single -- out.html "label"   # one self-contained HTML file (fonts + 3D model inlined)
 ```
 
 ## How it plays
@@ -90,12 +103,13 @@ src/
            ObstacleWatcher (clears / near misses), PowerUps, VirusBoss
   world/   Track (data streams + motherboard), ComputerWorld (instanced districts, holo windows, core),
            Obstacles (hazards + bad bugs), Pickups (collectibles, good bugs, power-ups), Spawner (fair generation)
-  render/  Quality (tiers + silent auto-degrade), MaterialLib (procedural PBR), Environment (PMREM), Reflection (planar mirror)
+  render/  Quality (tiers), MaterialLib (procedural PBR), Environment (PMREM), Reflection (planar mirror),
+           Watchdog (black-screen fallback, GPU reset hand-off, flight recorder)
   fx/      PostFX (DOF, bloom, motion blur, glitch, grade), FXDirector (event → effects), Particles (shaped sprites), Trails, SpeedLines
   audio/   AudioManager (buses, modes, beat sync, SFX), HipHopEngine (procedural soundtrack), synth (instruments), MusicFiles (drop-in tracks)
   ui/      HUD (glass dashboard, bug-fix cards, banners, sound settings, SYSTEM FAILURE, reboot), premium.css
 assets/music/  drop-in soundtrack files
-scripts/   playtest, scenarios, bot, shot (+ lib)
+scripts/   playtest, scenarios, bot, shot (+ lib), check-gpu-reset, check-shader-stalls, build-single
 ```
 
 Key decisions:
