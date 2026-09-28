@@ -19,8 +19,7 @@ const res = await page.evaluate(async () => {
   await new Promise((r) => setTimeout(r, 3000)); // menu: shaders + first draws are warmed here
   const progs = () => new Set(R.info.programs);
   const events = [];
-  const stalls = [];
-  const times = [];
+  const frames = [];
   g.autoLoop = false;
   g.tutorialOverride = false;
   g.input.trigger('confirm');
@@ -32,15 +31,11 @@ const res = await page.evaluate(async () => {
       g.stepFrame(1 / 60);
       gl.finish();
       const ms = performance.now() - t;
-      times.push(ms);
+      frames.push({ during: label, ms: Math.round(ms) });
       const after = progs();
       const added = [...after].filter((p) => !before.has(p)).length;
       const removed = [...before].filter((p) => !after.has(p)).length;
       if (added || removed) events.push({ during: label, added, removed });
-      if (times.length > 30) {
-        const sorted = [...times].sort((a, b) => a - b);
-        if (ms > sorted[sorted.length >> 1] * 6) stalls.push({ during: label, ms: Math.round(ms) });
-      }
     }
   };
   step(180, 'running');
@@ -54,8 +49,11 @@ const res = await page.evaluate(async () => {
   }
   g.distance = 1345;
   step(240, 'boss');
-  times.sort((a, b) => a - b);
-  return { programChanges: events, stalls, programs: R.info.programs.length, medianMs: Math.round(times[times.length >> 1]), maxMs: Math.round(times[times.length - 1]) };
+  // A stall = a frame far slower than a typical frame (a shader/pipeline build).
+  const times = frames.map((f) => f.ms).sort((a, b) => a - b);
+  const median = times[times.length >> 1];
+  const stalls = frames.filter((f) => f.ms > median * 6);
+  return { programChanges: events, stalls, programs: R.info.programs.length, medianMs: median, maxMs: times[times.length - 1] };
 });
 const ok = res.programChanges.length === 0 && res.stalls.length === 0 && errors.length === 0;
 console.log(JSON.stringify({ ok, ...res, errors }, null, 1));
