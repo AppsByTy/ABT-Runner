@@ -3,10 +3,19 @@ import './ui/premium.css';
 import { GameManager } from './core/GameManager';
 import { events } from './core/EventBus';
 import { audio } from './audio/AudioManager';
+import { attachStress, startupVariant, variantSpec } from './dev/stress';
 
 const container = document.getElementById('app')!;
-const game = new GameManager(container);
+// On-device crash test harness: only in builds made with VITE_STRESS=1.
+const variant = import.meta.env.VITE_STRESS ? startupVariant() : null;
+const spec = variantSpec(variant);
+if (spec && !spec.audio) {
+  // No audio at all: the game finds no Web Audio support and stays silent.
+  Object.assign(window, { AudioContext: undefined, webkitAudioContext: undefined });
+}
+const game = new GameManager(container, { avatar: spec?.avatar ?? true });
 game.run();
+if (import.meta.env.VITE_STRESS) attachStress(game, variant);
 
 // Test/debug handle (dev builds only).
 if (import.meta.env.DEV) {

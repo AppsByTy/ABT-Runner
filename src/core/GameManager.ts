@@ -92,6 +92,10 @@ export class GameManager {
   private gpuLost = false;
   private beatTime = 0;
   private fpsCount = 0;
+  /** Session counters for the flight recorder. */
+  private runs = 0;
+  private actions = 0;
+  private resizes = 0;
   readonly fx: FXDirector;
   readonly hud: HUD;
 
@@ -153,7 +157,8 @@ export class GameManager {
   private readonly oBox = makeAABB();
   private readonly oPrev = makeAABB();
 
-  constructor(container: HTMLElement) {
+  /** @param opts.avatar false = keep the procedural runner (on-device A/B crash test) */
+  constructor(container: HTMLElement, opts: { avatar?: boolean } = {}) {
     const params = new URLSearchParams(location.search);
     this.debug = params.has('debug');
     const seedParam = params.get('seed');
@@ -272,7 +277,7 @@ export class GameManager {
     // Pre-compile every shader (incl. pooled, not-yet-visible hazards, bosses
     // and power-ups) during the menu so nothing compiles mid-run.
     // Sculpted 3D runner model (falls back to the procedural character if it can't load).
-    loadAvatar(tyMeshUrl, tyAlbedoUrl)
+    if (opts.avatar !== false) loadAvatar(tyMeshUrl, tyAlbedoUrl)
       .then((av) => {
         this.player.character.attachModel(av);
         this.warmShaders();
@@ -444,6 +449,7 @@ export class GameManager {
   start(): void {
     if (this.state !== GameState.Ready) return;
     if (this.setState(GameState.Playing)) {
+      this.runs++;
       events.emit('runStart');
       audio.play('ui');
       this.hud.banner('STAGE 1', this.stage.name, 'cyan', 1.4);
@@ -468,6 +474,7 @@ export class GameManager {
       if (this.state !== GameState.GameOver) return;
       this.resetRun();
       if (this.setState(GameState.Playing)) {
+        this.runs++;
         events.emit('runStart');
         this.hud.banner('SYSTEM RESTORED', `STAGE 1 · ${this.stage.name}`, 'green', 1.4);
       }
@@ -491,6 +498,7 @@ export class GameManager {
         if (a !== 'pause') this.start();
         return;
       case GameState.Playing:
+        this.actions++;
         if (a === 'left') this.player.moveLane(-1);
         else if (a === 'right') this.player.moveLane(1);
         else if (a === 'jump') this.player.jump();
@@ -641,7 +649,8 @@ export class GameManager {
 
     this.beatTime += realDt;
     if (this.beatTime >= 1) {
-      this.watchdog.heartbeat(this.state, this.distance, this.fpsCount / this.beatTime);
+      this.watchdog.heartbeat(this.state, this.distance, this.fpsCount / this.beatTime,
+        `run ${this.runs} · ${this.actions} swipes · ${this.hits} hits · ${this.resizes} resizes · view ${window.innerWidth}x${window.innerHeight} · open ${Math.round(performance.now() / 1000)} s`);
       this.beatTime = this.fpsCount = 0;
     }
     this.fpsCount++;
@@ -1102,6 +1111,7 @@ export class GameManager {
   }
 
   private onResize = (): void => {
+    this.resizes++;
     const w = window.innerWidth;
     const h = window.innerHeight;
     this.renderer.setPixelRatio(this.pixelRatio);

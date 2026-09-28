@@ -75,8 +75,8 @@ export class RenderWatchdog {
   }
 
   /** Heartbeat for the flight recorder (call about once per second). */
-  heartbeat(state: string, distance: number, fps: number): void {
-    this.flight.beat(state, distance, fps);
+  heartbeat(state: string, distance: number, fps: number, detail = ''): void {
+    this.flight.beat(state, distance, fps, detail);
   }
 
   /**
@@ -118,6 +118,8 @@ interface Flight {
   fps: number;
   /** Last GPU event: '' | 'gpu-lost' | 'gpu-restored'. */
   gpu: string;
+  /** Session counters at the last heartbeat. */
+  detail?: string;
   closed: boolean;
 }
 
@@ -158,16 +160,17 @@ class FlightRecorder {
   previousEnding(): string | null {
     const p = this.prev;
     if (!p || p.closed) return null;
-    const where = `${p.state === 'playing' ? 'mid-run' : `in ${p.state}`} at ${Math.round(p.d)} m, ${p.fps} fps (${p.at})`;
+    const where = `${p.state === 'playing' ? 'mid-run' : `in ${p.state}`} at ${Math.round(p.d)} m, ${p.fps} fps (${p.at})${p.detail ? `\n  ${p.detail}` : ''}`;
     if (p.gpu === 'gpu-lost') return `GPU context lost and not restored ${where}`;
     if (p.state === 'boot') return null;
     return `page was killed by the system ${where}${p.gpu === 'gpu-restored' ? ' after a GPU reset' : ''}`;
   }
 
-  beat(state: string, d: number, fps: number): void {
+  beat(state: string, d: number, fps: number, detail: string): void {
     this.rec.state = state;
     this.rec.d = d;
     this.rec.fps = Math.round(fps);
+    this.rec.detail = detail;
     this.write();
   }
 
