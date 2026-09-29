@@ -45,11 +45,16 @@ export interface GameEvents {
 
   stage: { id: number; name: string };
 
-  bossStart: { name: string; needed: number };
+  /** Boss encounters (see boss/BossDirector). */
+  bossWarning: { name: string };
+  bossStart: { name: string; index: number };
+  bossImpact: At & { color: string };
   bossActive: undefined;
-  bossPatched: { progress: number; needed: number };
-  bossDeleted: undefined;
-  bossEscaped: undefined;
+  bossHit: At & { dmg: number; hp: number; max: number; kind: 'patch' | 'dodge' };
+  bossPhase: At & { phase: number; label: string };
+  bossDeleted: At & { name: string; index: number };
+  bossExplode: At & { size: number; color: string };
+  bossDebris: { x: number; z: number; color: string };
   bossEnd: undefined;
 
   death: { kind: ObstacleKind; score: number; distance: number };

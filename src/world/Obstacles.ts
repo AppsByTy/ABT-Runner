@@ -18,7 +18,7 @@ import type { AABB } from '../utils/math';
  * Bad bugs are hazards that move: glitch bugs charge, malware bugs switch
  * lanes (telegraphed), virus drones hover at head height.
  */
-export type ObstacleKind = 'firewall' | 'errorWindow' | 'corruptBlock' | 'glitchBug' | 'virusDrone' | 'malwareBug' | 'packet';
+export type ObstacleKind = 'firewall' | 'errorWindow' | 'corruptBlock' | 'glitchBug' | 'virusDrone' | 'malwareBug' | 'packet' | 'laser' | 'shock';
 export type ObstacleClass = 'low' | 'high' | 'wall';
 
 export const KIND_CLASS: Record<ObstacleKind, ObstacleClass> = {
@@ -26,7 +26,9 @@ export const KIND_CLASS: Record<ObstacleKind, ObstacleClass> = {
   glitchBug: 'low',
   malwareBug: 'low',
   packet: 'low',
+  shock: 'low',
   errorWindow: 'high',
+  laser: 'high',
   virusDrone: 'high',
   corruptBlock: 'wall',
 };
@@ -39,6 +41,8 @@ export const KIND_LABEL: Record<ObstacleKind, string> = {
   virusDrone: 'VIRUS BUG',
   malwareBug: 'MALWARE BUG',
   packet: 'CORRUPT PACKET',
+  laser: 'SCAN LASER',
+  shock: 'SHOCKWAVE',
 };
 
 export const isBadBug = (k: ObstacleKind): boolean => k === 'glitchBug' || k === 'virusDrone' || k === 'malwareBug';
@@ -343,6 +347,8 @@ export interface SpawnOpts {
   toLane?: number;
   /** Spawned close to the player: animate materialising in. */
   materialize?: boolean;
+  /** Boss attacks (laser / shockwave): energy colour. */
+  color?: THREE.ColorRepresentation;
 }
 
 export class ObstacleManager {
@@ -687,6 +693,100 @@ export class ObstacleManager {
       return o;
     };
 
+    // SCAN LASER (boss attack, high: slide under) -------------------------------------
+    // Two emitter posts and a humming beam at head height across the lane.
+    const beamVert = 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }';
+    const postGeo = mergeGeometries([
+      new THREE.CylinderGeometry(0.09, 0.14, 2.05, 10).translate(0, 1.02, 0),
+      new THREE.CylinderGeometry(0.2, 0.24, 0.12, 12).translate(0, 0.06, 0),
+      new THREE.CylinderGeometry(0.19, 0.19, 0.44, 8).translate(0, 1.78, 0),
+    ])!;
+    const laserPost = rimify(
+      new THREE.MeshStandardMaterial({ color: 0x1c1f2a, metalness: 0.9, roughness: 0.28, normalMap: lib.brushedNormal, roughnessMap: lib.brushedRough }),
+      '#ff2a4a', 0.8, 2.5, false,
+    );
+    const makeLaser = (): Obstacle => {
+      const [g, b] = group();
+      const uniforms = { uColor: { value: new THREE.Color('#ff2a4a') }, uTime: THEME.uTime, uAppear: { value: 1 } };
+      const beamMat = new THREE.ShaderMaterial({
+        uniforms,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+        vertexShader: beamVert,
+        fragmentShader: /* glsl */ `
+          uniform vec3 uColor; uniform float uTime; uniform float uAppear;
+          varying vec2 vUv;
+          void main() {
+            float r = abs(vUv.y - 0.5) * 2.0;
+            float core = smoothstep(0.22, 0.0, r);
+            float glow = pow(1.0 - r, 3.0);
+            float hum = 0.82 + 0.18 * sin(uTime * 60.0 + vUv.x * 40.0) * sin(uTime * 23.0);
+            float crawl = 0.5 + 0.5 * sin(vUv.x * 26.0 - uTime * 30.0);
+            vec3 c = uColor * glow * (1.3 + crawl * 0.6) + vec3(1.0) * core * 1.4;
+            gl_FragColor = vec4(c * hum * uAppear, 1.0);
+          }`,
+      });
+      const BL = LW * 0.94;
+      const beam = new THREE.Mesh(new THREE.PlaneGeometry(BL, 0.42), beamMat);
+      beam.position.y = 1.78;
+      const beam2 = beam.clone();
+      beam2.rotation.x = Math.PI / 2;
+      const capMat = new THREE.MeshBasicMaterial({ color: new THREE.Color('#ff2a4a').multiplyScalar(2.2) });
+      for (const side of [-1, 1]) {
+        const post = new THREE.Mesh(postGeo, laserPost);
+        post.position.x = side * BL * 0.5;
+        const cap = new THREE.Mesh(new THREE.SphereGeometry(0.12, 12, 8), capMat);
+        cap.position.set(side * (BL * 0.5 - 0.18), 1.78, 0);
+        b.add(post, cap);
+      }
+      b.add(beam, beam2);
+      const o = fresh('laser', g, b, 0.5);
+      o.uniforms = uniforms;
+      (o as Obstacle & { cap?: THREE.MeshBasicMaterial }).cap = capMat;
+      return o;
+    };
+
+    // SHOCKWAVE (boss attack, low: jump) -------------------------------------------------
+    // A rolling wall of energy across the lane, bulging toward the runner.
+    const shockGeo = new THREE.CylinderGeometry(7, 7, 0.9, 28, 1, true, Math.PI - (LW * 0.94) / 14, (LW * 0.94) / 7).translate(0, 0.45, 7);
+    const makeShock = (): Obstacle => {
+      const [g, b] = group();
+      const uniforms = { uColor: { value: new THREE.Color('#ffd23a') }, uTime: THEME.uTime, uAppear: { value: 1 } };
+      const mat = new THREE.ShaderMaterial({
+        uniforms,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+        vertexShader: beamVert,
+        fragmentShader: /* glsl */ `
+          uniform vec3 uColor; uniform float uTime; uniform float uAppear;
+          varying vec2 vUv;
+          ${GLSL_HASH}
+          void main() {
+            float y = vUv.y;
+            float edge = smoothstep(0.78, 0.97, y) * smoothstep(1.0, 0.97, y);
+            float body = pow(1.0 - y, 1.6);
+            float arcs = smoothstep(0.55, 1.0, vnoise(vec2(vUv.x * 18.0, y * 3.0 - uTime * 6.0)));
+            float scan = 0.6 + 0.4 * sin(vUv.x * 60.0 + uTime * 25.0);
+            vec3 c = uColor * (body * 1.1 + arcs * 0.9 * (1.0 - y)) * scan + vec3(1.0) * edge * 1.6;
+            gl_FragColor = vec4(c * uAppear, 1.0);
+          }`,
+      });
+      const wave = new THREE.Mesh(shockGeo, mat);
+      b.add(wave);
+      const floorMat = new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffd23a').multiplyScalar(1.4), transparent: true, opacity: 0.55, depthWrite: false, blending: THREE.AdditiveBlending });
+      const floor = new THREE.Mesh(new THREE.PlaneGeometry(LW * 0.94, 0.5).rotateX(-Math.PI / 2), floorMat);
+      floor.position.set(0, 0.02, 0.1);
+      b.add(floor);
+      const o = fresh('shock', g, b, 0.6);
+      o.uniforms = uniforms;
+      (o as Obstacle & { cap?: THREE.MeshBasicMaterial }).cap = floorMat;
+      return o;
+    };
+
     const onAcquire = (o: Obstacle): void => {
       o.mesh.visible = true;
     };
@@ -714,6 +814,8 @@ export class ObstacleManager {
       virusDrone: new Pool(add(makeVirus), onAcquire, onRelease, 6),
       malwareBug: new Pool(add(makeMalware), onAcquire, onRelease, 4),
       packet: new Pool(add(makePacket), onAcquire, onRelease, 6),
+      laser: new Pool(add(makeLaser), onAcquire, onRelease, 9),
+      shock: new Pool(add(makeShock), onAcquire, onRelease, 9),
     };
   }
 
@@ -748,6 +850,11 @@ export class ObstacleManager {
       t.offset.set((o.variant % 2) * 0.5, 0.5 - Math.floor((o.variant % 4) / 2) * 0.5);
     }
     if (o.marker) o.marker.visible = kind === 'packet' || o.toLane >= 0;
+    if ((kind === 'laser' || kind === 'shock') && o.uniforms) {
+      const c = new THREE.Color(opts.color ?? (kind === 'laser' ? '#ff2a4a' : '#ffd23a'));
+      (o.uniforms.uColor.value as THREE.Color).copy(c);
+      (o as Obstacle & { cap?: THREE.MeshBasicMaterial }).cap?.color.copy(c).multiplyScalar(2);
+    }
     if (opts.materialize) this.onMaterialize(o);
     return o;
   }
@@ -838,6 +945,12 @@ export class ObstacleManager {
         o.body.rotation.y = t * 1.5;
         break;
       }
+      case 'shock': {
+        // A rolling wave: it closes in a little faster than the world scrolls.
+        if (ahead < 40 && ahead > 0) o.dist -= 3 * dt;
+        o.body.scale.y = 0.9 + Math.sin(t * 18) * 0.1;
+        break;
+      }
       default:
         break;
     }
@@ -867,4 +980,4 @@ export class ObstacleManager {
   }
 }
 
-const KINDS: readonly ObstacleKind[] = ['firewall', 'errorWindow', 'corruptBlock', 'glitchBug', 'virusDrone', 'malwareBug', 'packet'];
+const KINDS: readonly ObstacleKind[] = ['firewall', 'errorWindow', 'corruptBlock', 'glitchBug', 'virusDrone', 'malwareBug', 'packet', 'laser', 'shock'];

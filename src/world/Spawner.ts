@@ -130,16 +130,16 @@ export class Spawner {
   }
 
   /**
-   * Boss sequence: hazards now materialise much closer (dropped by the virus)
-   * and every row carries a security patch.
+   * Boss encounter: normal generation stops (the boss director spawns the
+   * attacks) and everything queued beyond the arena is cleared away.
    */
   setBoss(on: boolean, distance: number): void {
     if (on === this.boss) return;
     this.boss = on;
     if (!on) return;
     this.ahead = 62;
-    const cut = distance + 72;
-    // The virus swallows everything queued further ahead.
+    const cut = distance + 45;
+    // The boss swallows everything queued further ahead.
     this.obstacles.forEach((o) => {
       if (o.dist > cut) this.obstacles.destroy(o);
     });
@@ -156,9 +156,23 @@ export class Spawner {
     this.nextRowDist = Math.max(cut, this.lastRowDist + 12);
   }
 
+  /** Boss beaten: pick normal generation up again just ahead of the runner. */
+  resume(distance: number): void {
+    this.boss = false;
+    this.ahead = 40;
+    this.reach = ALL;
+    this.busyUntil.fill(0);
+    this.history = [];
+    this.lastRowDist = distance + 30;
+    this.nextRowDist = distance + 42;
+    // A power-up soon after the win.
+    this.nextPowerAt = distance + 90;
+  }
+
   update(distance: number, speed: number, speedFactor: number, dt: number): void {
+    if (this.boss) return;
     // After a boss, ease the horizon back out instead of popping 100 m of content in.
-    const target = this.boss ? 62 : CONFIG.spawn.aheadDistance;
+    const target = CONFIG.spawn.aheadDistance;
     if (this.ahead < target) this.ahead = Math.min(target, this.ahead + dt * 45);
     else this.ahead = target;
 
@@ -166,9 +180,8 @@ export class Spawner {
       const d = this.nextRowDist;
       const diff = Spawner.difficulty(d);
       const near = d - distance < 130;
-      if (this.boss) this.spawnBossRow(d, near);
-      else this.spawnRow(d, diff, speed, speedFactor, near);
-      const interval = this.boss ? 1.25 : lerp(CONFIG.spawn.rowIntervalEasy, CONFIG.spawn.rowIntervalHard, diff);
+      this.spawnRow(d, diff, speed, speedFactor, near);
+      const interval = lerp(CONFIG.spawn.rowIntervalEasy, CONFIG.spawn.rowIntervalHard, diff);
       this.nextRowDist += speed * interval * this.rng.range(0.9, 1.15);
     }
   }
@@ -275,37 +288,6 @@ export class Spawner {
       else p.kind = 'firewall';
     }
     return picks;
-  }
-
-  private spawnBossRow(d: number, near: boolean): void {
-    const rng = this.rng;
-    const { walls, move } = this.lanesInGap();
-    const lanes = LANES.filter((l) => has(move, l) && !has(walls, l));
-    // Hazards in 1-2 lanes, always leaving at least one lane clear.
-    const count = Math.min(lanes.length - 1, rng.chance(0.6) ? 2 : 1);
-    const hazardLanes = count > 0 ? rng.shuffle([...lanes]).slice(0, count) : [];
-    for (const l of hazardLanes) {
-      const kind: ObstacleKind = rng.chance(0.62) ? 'packet' : rng.chance(0.5) ? 'virusDrone' : 'errorWindow';
-      this.obstacles.spawn(kind, l, d, { materialize: near, variant: rng.int(0, 3) });
-    }
-    // Security patch in the gap before this row, in a lane that's reachable.
-    const patchLanes = LANES.filter((l) => has(move, l) && !has(walls, l));
-    if (patchLanes.length) {
-      const pd = this.lastRowDist + (d - this.lastRowDist) * 0.5;
-      this.pickups.spawn('bossPatch', rng.pick(patchLanes), pd, 1.0);
-    }
-    const clear = lanes.filter((l) => !hazardLanes.includes(l));
-    let newReach = 0;
-    for (const l of lanes) newReach |= bit(l);
-    this.reach = newReach || ALL;
-    // Coins in a clear lane.
-    if (clear.length) {
-      const l = rng.pick(clear);
-      for (let x = this.lastRowDist + 4; x < d - 2; x += CONFIG.coin.spacing) this.pickups.spawn('coin', l, x);
-    }
-    this.lastRowDist = d;
-    this.history.push({ dist: d, reachAfter: this.reach });
-    if (this.history.length > 40) this.history.shift();
   }
 
   /** Lanes reachable from `from` by sideways moves that never cross a wall. */
