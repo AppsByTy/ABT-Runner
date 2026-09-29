@@ -33,8 +33,8 @@ if (want('debug')) await snap('05-debug', "g.powers.activate('debug')", 50, 300)
 if (want('admin')) await snap('06-admin', "g.powers.reset(); g.powers.activate('admin')", 50, 300);
 if (want('shield')) await snap('07-firewall', "g.powers.reset(); g.powers.activate('firewall')", 30, 200);
 if (want('stage')) await snap('08-stage4', "g.powers.reset(); g.distance = 1760; g.prevDistance = 1760;", 120, 200);
-if (want('boss')) await snap('09-boss', "g.boss.begin()", 220, 200);
-if (want('boss')) await snap('10-boss-active', "g.player.grace(99);", 120, 100);
+if (want('boss')) await snap('09-boss-intro', "g.boss.trigger(0)", 330, 200);
+if (want('boss')) await snap('10-boss-fight', "g.player.grace(99);", 400, 100);
 if (want('core')) await snap('11-core', "g.player.grace(99); g.distance = 4460; g.prevDistance = 4460;", 400, 300);
 if (want('over')) await snap('12-gameover', "g.player.grace(0); g.powers.reset(); g.player.invuln = 0; g.health = 5; g.obstacles.spawn('corruptBlock', g.player.lane, g.distance + 3, { depth: 8 });", 200, 700);
 if (want('over')) {

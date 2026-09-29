@@ -81,16 +81,16 @@ const results = await page.evaluate(() => {
   }
   out['repeated hits crash the system'] = `crashed=${g.state === 'dying' || g.state === 'gameover'} after ${crashedAfter} hits | health ${Math.round(g.health)}`;
 
-  // Boss: collect patches until deleted.
+  // Boss: patches damage it until it is deleted.
   fresh();
-  g.boss.begin();
-  for (let i = 0; i < 60 * 3; i++) g.stepFrame(1 / 60);
-  for (let k = 0; k < 12 && g.boss.phase === 'active'; k++) {
+  g.boss.trigger(0);
+  for (let i = 0; i < 60 * 10 && g.boss.state !== 'fight'; i++) g.stepFrame(1 / 60);
+  for (let k = 0; k < 20 && g.boss.state === 'fight'; k++) {
     g.player.grace(99);
     g.pickups.spawn('bossPatch', g.player.lane, g.distance + 3, 1.0);
     for (let i = 0; i < 30; i++) g.stepFrame(1 / 60);
   }
-  out['virus boss deleted by patches'] = `phase ${g.boss.phase} | progress ${g.boss.progress}/${g.boss.needed}`;
+  out['boss defeated by patches'] = `state ${g.boss.state} | hp ${g.boss.hp}/${g.boss.maxHp}`;
   return out;
 });
 console.log(JSON.stringify(results, null, 1));

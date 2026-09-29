@@ -6,7 +6,7 @@
 .bossbar {
   position: absolute;
   left: 50%;
-  top: calc(var(--safe-top) + 132px);
+  top: calc(var(--safe-top) + 168px);
   width: min(92vw, 520px);
   transform: translate(-50%, -8px);
   opacity: 0;
@@ -75,11 +75,11 @@
 }
 
 .hud.boss-on .cards {
-  transform: translateY(58px);
+  transform: translateY(40px);
 }
 
 .hud.boss-on .m-toast {
-  margin-top: 58px;
+  margin-top: 40px;
 }
 
 /* Letterbox */
