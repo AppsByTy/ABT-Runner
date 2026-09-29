@@ -12,17 +12,27 @@ import type { MusicMode } from './HipHopEngine';
  *   anything else -> gameplay rotation (tracks auto-switch when one ends)
  *
  * Any mode without a file keeps using the procedural hip-hop engine.
+ *
+ * A long DJ mix can be dropped in as numbered parts - `mix-1-<title>.mp3`,
+ * `mix-2-<title>.mp3`, ... - and then it IS the soundtrack: one continuous
+ * playlist for every screen (menu, run, boss, game over just colour it with
+ * filters), played part after part and remembered between sessions. Parts
+ * are streamed, never decoded whole, so an hour of music costs no memory.
+ * Name: "mix-1-playgrnd-series--mike-nasty" shows as PLAYGRND SERIES · MIKE NASTY.
  */
 const found = import.meta.glob('../../assets/music/*.{mp3,ogg,wav,m4a}', { eager: true, query: '?url', import: 'default' }) as Record<string, string>;
 
 export interface MusicTrack {
   name: string;
   url: string;
-  mode: MusicMode;
+  mode: MusicMode | 'mix';
 }
 
-function classify(name: string): MusicMode {
+const MIX_RE = /^mix[-_ ]?(\d+)[-_ ]?/i;
+
+function classify(name: string): MusicMode | 'mix' {
   const n = name.toLowerCase();
+  if (MIX_RE.test(n)) return 'mix';
   if (n.includes('menu')) return 'menu';
   if (n.includes('boss')) return 'boss';
   if (n.includes('debug')) return 'debug';
@@ -35,7 +45,19 @@ export const MUSIC_FILES: MusicTrack[] = Object.entries(found)
     const name = path.split('/').pop()!.replace(/\.[^.]+$/, '');
     return { name, url, mode: classify(name) };
   })
-  .sort((a, b) => a.name.localeCompare(b.name));
+  .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+
+/** The DJ mix parts in order (empty = no mix, use the per-mode files / engine). */
+export const MIX: MusicTrack[] = MUSIC_FILES.filter((t) => t.mode === 'mix');
+
+/** Display title of the mix, from the first part's file name. */
+export const MIX_TITLE = MIX.length
+  ? MIX[0].name
+      .replace(MIX_RE, '')
+      .split('--')
+      .map((w) => w.replace(/[-_]+/g, ' ').trim().toUpperCase())
+      .join(' · ')
+  : '';
 
 export function tracksFor(mode: MusicMode): MusicTrack[] {
   const list = MUSIC_FILES.filter((t) => t.mode === mode);

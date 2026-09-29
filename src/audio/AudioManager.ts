@@ -1,5 +1,5 @@
 import { HipHopEngine, type MusicMode } from './HipHopEngine';
-import { tracksFor, type MusicTrack } from './MusicFiles';
+import { MIX, MIX_TITLE, tracksFor, type MusicTrack } from './MusicFiles';
 import { bell, glitch, kick, makeImpulse, midi, noiseBuffer, satCurve, stab, sweep, vox, type Buses } from './synth';
 
 /**
@@ -54,6 +54,8 @@ export type SoundId =
   | 'ui';
 
 const STORE_KEY = 'coderunner.audio.v2';
+/** Where the DJ mix was left (part + seconds), so the next session carries on. */
+const MIX_KEY = 'coderunner.mix.v1';
 
 export interface AudioSettings {
   /** Master mute (HUD speaker button). */
@@ -94,6 +96,7 @@ export class AudioManager {
   private fileTrack: MusicTrack | null = null;
   private fileIdx = new Map<MusicMode, number>();
   private bassBins: Uint8Array<ArrayBuffer> | null = null;
+  private bassPrev = 0;
   private bassAvg = 0;
   private lastFileBeat = 0;
 
@@ -114,6 +117,9 @@ export class AudioManager {
     const unlock = (): void => {
       this.ensure();
       void this.ctx?.resume();
+      // iOS only lets a media element start inside a tap (touchend / click), and
+      // not from pointerdown - so every tap re-tries a mix that should be playing.
+      this.kickMedia();
     };
     window.addEventListener('pointerdown', unlock, { passive: true });
     window.addEventListener('touchend', unlock, { passive: true });
@@ -142,6 +148,7 @@ export class AudioManager {
 
   /** Name of what is playing (for the settings screen). */
   get nowPlaying(): string {
+    if (this.fileTrack?.mode === 'mix') return `${MIX_TITLE} · ${MIX.indexOf(this.fileTrack) + 1}/${MIX.length}`;
     if (this.fileTrack) return this.fileTrack.name;
     return this.engine?.songName ?? '';
   }
@@ -235,7 +242,9 @@ export class AudioManager {
     glue.attack.value = 0.01;
     glue.release.value = 0.2;
     this.analyser = ctx.createAnalyser();
-    this.analyser.fftSize = 256;
+    // 43 Hz bins, barely smoothed: kick drums show up as sharp low-end onsets.
+    this.analyser.fftSize = 1024;
+    this.analyser.smoothingTimeConstant = 0.2;
     this.musicMix.connect(glue).connect(this.musicFilter).connect(this.musicBus).connect(this.master);
     this.musicMix.connect(this.analyser);
 
@@ -356,19 +365,183 @@ export class AudioManager {
     if (!this.ctx || !this.engine) return;
     const t = this.ctx.currentTime;
     // Mode colour: menu = warm/atmospheric, game over = sinks under water.
-    const cutoff = this.paused && mode !== 'gameover' ? 900 : mode === 'menu' ? 2600 : mode === 'gameover' ? 420 : 19000;
+    // (A DJ mix stays full-range on the menu - only pause and game over colour it.)
+    const menuCut = this.usingMix ? 19000 : 2600;
+    const cutoff = this.paused && mode !== 'gameover' ? 900 : mode === 'menu' ? menuCut : mode === 'gameover' ? 420 : 19000;
     this.musicFilter.frequency.setTargetAtTime(cutoff, t, mode === 'gameover' ? 0.6 : 0.25);
-    this.musicMix.gain.setTargetAtTime(mode === 'gameover' ? 0.45 : mode === 'debug' || mode === 'boss' ? 0.95 : 0.85, t, mode === 'gameover' ? 0.8 : 0.2);
+    const level = mode === 'gameover' ? 0.45 : mode === 'debug' || mode === 'boss' ? 0.95 : mode === 'menu' && this.usingMix ? 0.75 : 0.85;
+    this.musicMix.gain.setTargetAtTime(level, t, mode === 'gameover' ? 0.8 : 0.2);
     if (!changed) return;
     this.engine.mode = mode;
     if ((mode === 'boss' || mode === 'debug') && !force) sweep(this.ctx, { out: this.musicMix, verb: this.musicMix, delay: this.musicMix }, t, 0.6, true, 0.6);
+    // A DJ mix is the whole soundtrack: it keeps playing through every mode.
+    if (this.usingMix) {
+      this.playMix();
+      return;
+    }
     const files = tracksFor(mode);
     if (files.length) this.playFile(files, mode);
     else this.stopFile();
   }
 
+  // ------------------------------------------------------------- DJ mix
+
+  private mixPart = -1;
+  private mixFailed = false;
+  private mixSaveT = 0;
+  private mixPrimed = false;
+  /** Why the mix could not play (settings screen / diagnostics), if it failed. */
+  mixError = '';
+
+  get mixTitle(): string {
+    return MIX_TITLE;
+  }
+
+  get mixParts(): number {
+    return MIX.length;
+  }
+
+  /** A mix is present and playable. */
+  get usingMix(): boolean {
+    return MIX.length > 0 && !this.mixFailed;
+  }
+
+  private mixEls(): [HTMLAudioElement, GainNode][] {
+    const ctx = this.ctx!;
+    if (this.fileEls.length === 0) {
+      for (let n = 0; n < 2; n++) {
+        const el = new Audio();
+        el.crossOrigin = 'anonymous';
+        el.preload = 'auto';
+        (el as HTMLAudioElement & { playsInline?: boolean }).playsInline = true;
+        const g = ctx.createGain();
+        g.gain.value = 0;
+        ctx.createMediaElementSource(el).connect(g).connect(this.musicMix);
+        el.addEventListener('ended', () => {
+          if (this.usingMix) {
+            if (this.fileEls[this.fileSlot][0] === el) this.mixNext();
+            return;
+          }
+          // Auto-switch to the next track for this mode.
+          if (this.fileEls[this.fileSlot][0] === el) {
+            this.fileTrack = null;
+            const l = tracksFor(this.mode);
+            if (l.length) this.playFile(l, this.mode);
+          }
+        });
+        el.addEventListener('error', () => {
+          if (!this.usingMix || this.fileEls[this.fileSlot][0] !== el) return;
+          // Never go silent: fall back to the procedural soundtrack.
+          const e = el.error;
+          this.mixError = `mix part ${this.mixPart + 1} failed (${e ? `code ${e.code}` : 'unknown'})`;
+          console.warn('[audio]', this.mixError);
+          this.mixFailed = true;
+          this.fileTrack = null;
+          this.applyMode(true);
+          if (this.musicOn) this.engine?.start();
+        });
+        this.fileEls.push([el, g]);
+      }
+    }
+    return this.fileEls;
+  }
+
+  /** Start (or keep) the mix playing, resuming where the last session left off. */
+  private playMix(): void {
+    if (this.fileTrack?.mode === 'mix') return;
+    const ctx = this.ctx!;
+    const els = this.mixEls();
+    let part = 0;
+    let at = 0;
+    try {
+      const saved = JSON.parse(localStorage.getItem(MIX_KEY) ?? 'null') as { part: number; t: number } | null;
+      if (saved && saved.part >= 0 && saved.part < MIX.length) {
+        part = saved.part;
+        at = Math.max(0, saved.t - 2);
+      }
+    } catch {
+      /* storage unavailable */
+    }
+    this.engine?.stop();
+    this.startPart(els, part, at, ctx.currentTime, 0.6);
+  }
+
+  private startPart(els: [HTMLAudioElement, GainNode][], part: number, at: number, t: number, fade: number): void {
+    const [oldEl, oldG] = els[this.fileSlot];
+    if (this.fileTrack) {
+      oldG.gain.setTargetAtTime(0, t, fade / 3);
+      window.setTimeout(() => oldEl.pause(), fade * 1000 + 400);
+      this.fileSlot = 1 - this.fileSlot;
+    }
+    const [el, g] = els[this.fileSlot];
+    const track = MIX[part];
+    if (!el.src.endsWith(track.url.replace(/^\.\//, ''))) el.src = track.url;
+    el.loop = false;
+    const seek = (): void => {
+      if (at > 0 && Math.abs(el.currentTime - at) > 1) el.currentTime = at;
+    };
+    if (el.readyState >= 1) seek();
+    else el.addEventListener('loadedmetadata', seek, { once: true });
+    void el.play().catch(() => {});
+    g.gain.cancelScheduledValues(t);
+    g.gain.setValueAtTime(fade > 0.2 ? 0 : g.gain.value, t);
+    g.gain.setTargetAtTime(1, t, fade / 3);
+    this.fileTrack = track;
+    this.mixPart = part;
+  }
+
+  /** Hand over to the next part (a hair before this one ends, so there is no gap). */
+  private mixNext(): void {
+    if (!this.ctx || !this.usingMix) return;
+    const next = (this.mixPart + 1) % MIX.length;
+    this.startPart(this.mixEls(), next, 0, this.ctx.currentTime, 0.12);
+  }
+
+  /** Called on every tap: (re)start the mix element if the browser held it back. */
+  private kickMedia(): void {
+    if (!this.ctx || !this.usingMix || !this.fileTrack || document.hidden) return;
+    const els = this.mixEls();
+    const [el] = els[this.fileSlot];
+    if (el.paused) void el.play().catch(() => {});
+    if (!this.mixPrimed) {
+      // Unlock the second element now (silently, it is at zero gain) so the
+      // hand-over to the next part may start it later without a tap.
+      this.mixPrimed = true;
+      const [other] = els[1 - this.fileSlot];
+      other.src = MIX[(this.mixPart + 1) % MIX.length].url;
+      void other
+        .play()
+        .then(() => other.pause())
+        .catch(() => {});
+    }
+  }
+
+  /** Per frame: seamless part hand-over and remembering the position. */
+  private tickMix(dt: number): void {
+    if (!this.usingMix || this.fileTrack?.mode !== 'mix') return;
+    const [el] = this.fileEls[this.fileSlot];
+    const d = el.duration;
+    if (d && isFinite(d) && !el.paused && d - el.currentTime < 0.1) this.mixNext();
+    // Preload the next part a little before it is needed.
+    const [other] = this.fileEls[1 - this.fileSlot];
+    const nextUrl = MIX[(this.mixPart + 1) % MIX.length].url;
+    if (d && d - el.currentTime < 25 && !other.src.endsWith(nextUrl.replace(/^\.\//, ''))) {
+      other.src = nextUrl;
+      other.load();
+    }
+    this.mixSaveT += dt;
+    if (this.mixSaveT > 5) {
+      this.mixSaveT = 0;
+      try {
+        localStorage.setItem(MIX_KEY, JSON.stringify({ part: this.mixPart, t: Math.floor(el.currentTime) }));
+      } catch {
+        /* storage full / private mode */
+      }
+    }
+  }
+
   private startScheduler(): void {
-    this.engine?.start();
+    if (!this.fileTrack) this.engine?.start();
     this.timer = window.setInterval(() => {
       if (!this.ctx || this.ctx.state !== 'running') return;
       if (!this.fileTrack) this.engine?.pump();
@@ -381,25 +554,7 @@ export class AudioManager {
     this.fileIdx.set(mode, i);
     const track = list[i % list.length];
     if (this.fileTrack?.url === track.url) return;
-    if (this.fileEls.length === 0) {
-      for (let n = 0; n < 2; n++) {
-        const el = new Audio();
-        el.crossOrigin = 'anonymous';
-        el.preload = 'auto';
-        const g = ctx.createGain();
-        g.gain.value = 0;
-        ctx.createMediaElementSource(el).connect(g).connect(this.musicMix);
-        el.addEventListener('ended', () => {
-          // Auto-switch to the next track for this mode.
-          if (this.fileEls[this.fileSlot][0] === el) {
-            this.fileTrack = null;
-            const l = tracksFor(this.mode);
-            if (l.length) this.playFile(l, this.mode);
-          }
-        });
-        this.fileEls.push([el, g]);
-      }
-    }
+    this.mixEls();
     const t = ctx.currentTime;
     const [oldEl, oldG] = this.fileEls[this.fileSlot];
     oldG.gain.setTargetAtTime(0, t, 0.4);
@@ -428,6 +583,7 @@ export class AudioManager {
   /** Call once per frame: advances the beat envelope used for visual sync. */
   update(dt: number): number {
     const ctx = this.ctx;
+    if (ctx && ctx.state === 'running') this.tickMix(dt);
     if (!ctx || ctx.state !== 'running' || this.settings.muted || this.settings.musicMuted) {
       this.beat = Math.max(0, this.beat - dt * 4);
       return this.beat;
@@ -438,15 +594,18 @@ export class AudioManager {
       const a = this.analyser;
       if (!this.bassBins) this.bassBins = new Uint8Array(new ArrayBuffer(a.frequencyBinCount));
       a.getByteFrequencyData(this.bassBins);
+      // Low end (~40-170 Hz): a kick is a jump above the recent average.
       let e = 0;
-      for (let i = 1; i < 6; i++) e += this.bassBins[i];
-      e /= 5 * 255;
-      if (e > this.bassAvg * 1.35 && e > 0.35 && now - this.lastFileBeat > 0.25) {
+      for (let i = 1; i < 5; i++) e += this.bassBins[i];
+      e /= 4 * 255;
+      const flux = e - this.bassPrev;
+      this.bassPrev = e;
+      if (e > this.bassAvg * 1.12 && flux > 0.03 && e > 0.25 && now - this.lastFileBeat > 0.28) {
         this.lastFileBeat = now;
         this.lastKick = now;
         this.onBeat?.('kick');
       }
-      this.bassAvg += (e - this.bassAvg) * Math.min(1, dt * 4);
+      this.bassAvg += (e - this.bassAvg) * Math.min(1, dt * 3);
     } else if (this.engine) {
       const beats = this.engine.beats;
       while (beats.length && beats[0].time <= now) {

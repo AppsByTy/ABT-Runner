@@ -4,3 +4,6 @@ shots
 *.log
 .DS_Store
 scripts/_*
+
+# DJ mix parts: commercial music, never committed (public repo)
+assets/music/mix-*

@@ -8,6 +8,12 @@ export default defineConfig({
   // host + allowedHosts let Replit / phones on the LAN open the dev server.
   server: { host: true, port: 5173, allowedHosts: true },
   preview: { host: true, port: 5173, allowedHosts: true },
+  // Asset URLs in the JS are plain relative strings ("./assets/x.mp3"), not
+  // new URL(x, import.meta.url): in the single-file build the page may have no
+  // real URL, and that constructor would throw while the game is loading.
+  experimental: {
+    renderBuiltUrl: (filename: string, { hostType }: { hostType: string }) => (hostType === 'js' ? `./${filename}` : { relative: true }),
+  },
   build: {
     target: 'es2020',
     outDir: 'dist',

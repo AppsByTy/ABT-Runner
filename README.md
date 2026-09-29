@@ -49,6 +49,11 @@ Stability on phones:
 - Modes: MENU (slow, atmospheric), RUN, DEBUG (more layers, glitch), BOSS (dark phrygian, distorted), GAME OVER (sinks away).
 - **Your own music:** drop `.mp3/.ogg/.wav/.m4a` into `assets/music/` and rebuild — see `assets/music/README.md`
   (filename picks the mode: `menu`, `boss`, `debug`, `gameover`, anything else = gameplay).
+- **A DJ mix as the whole soundtrack:** name the parts `mix-1-<title>.mp3`, `mix-2-<title>.mp3`, … It then plays
+  through every screen (pause / game over just colour it), part after part, and picks up where you left off next
+  time. Parts are streamed, never decoded into memory, so an hour of music is fine on a phone; if a part can't load,
+  the built-in soundtrack takes over. Mix files are git-ignored: this repo is public, so commercial music stays out
+  of it (and out of any store build without a licence).
 - Sound settings (gear icon on the menu, SOUND in pause): music volume, SFX volume, mute music, mute SFX. Saved.
 - Beat sync: lighting, road dividers, bloom, HUD glow and particles pulse on the kick/snare.
 
