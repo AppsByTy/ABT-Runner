@@ -33,6 +33,9 @@ Stability on phones:
   off-screen in the menu. One-shot effects are pooled, never created/destroyed per event.
 - **GPU reset recovery.** If iOS drops the WebGL context, the run pauses, graphics are rebuilt in place (baked
   lighting re-baked) and you resume where you were. The page is never reloaded.
+- **Beat sync never restyles the HUD.** The music's beat only changes opacity/transform on a few elements. Rewriting a
+  CSS variable / box-shadow / filter on the glass HUD every frame got the page killed by iOS Safari (found with the
+  on-device crash tests in `src/dev/stress.ts`, built with `VITE_STRESS=1`).
 - **Flight recorder.** If the system kills the page mid-run, the next launch shows a short report (distance, FPS,
   whether the GPU had reset) so the cause is known.
 
