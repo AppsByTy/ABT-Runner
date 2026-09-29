@@ -26,6 +26,22 @@ export interface LifetimeStats {
   missionsDone: number;
   /** Seconds played. */
   time: number;
+  coinsSpent: number;
+  backupsUsed: number;
+}
+
+/** Shop state. Ids come from the catalog in game/Shop.ts (unknown ids are dropped there). */
+export interface ShopSave {
+  /** Outfits and trails bought (the free defaults are always owned). */
+  owned: string[];
+  outfit: string;
+  trail: string;
+  /** Power-up upgrade level (0-5) by power type. */
+  upgrades: Record<string, number>;
+  /** Boosts in stock by id. */
+  boosts: Record<string, number>;
+  /** Boosts switched on for the next run. */
+  armed: string[];
 }
 
 export interface ProfileData {
@@ -39,6 +55,7 @@ export interface ProfileData {
   set: number;
   missions: MissionSave[];
   stats: LifetimeStats;
+  shop: ShopSave;
 }
 
 export interface LevelInfo {
@@ -82,9 +99,11 @@ export function levelInfo(totalXp: number): LevelInfo {
   return { level, rank: rankFor(level), into: rest, need, frac: rest / need };
 }
 
-const freshStats = (): LifetimeStats => ({ runs: 0, bugsFixed: 0, coins: 0, distance: 0, bestDistance: 0, bossesDeleted: 0, missionsDone: 0, time: 0 });
+const freshStats = (): LifetimeStats => ({ runs: 0, bugsFixed: 0, coins: 0, distance: 0, bestDistance: 0, bossesDeleted: 0, missionsDone: 0, time: 0, coinsSpent: 0, backupsUsed: 0 });
 
-const fresh = (): ProfileData => ({ v: 1, best: 0, totalXp: 0, bank: 0, mult: 1, set: 0, missions: [], stats: freshStats() });
+export const freshShop = (): ShopSave => ({ owned: [], outfit: 'classic', trail: 'pink', upgrades: {}, boosts: {}, armed: [] });
+
+const fresh = (): ProfileData => ({ v: 1, best: 0, totalXp: 0, bank: 0, mult: 1, set: 0, missions: [], stats: freshStats(), shop: freshShop() });
 
 const num = (v: unknown, min = 0): number => (typeof v === 'number' && Number.isFinite(v) ? Math.max(min, v) : min);
 
@@ -160,6 +179,19 @@ export class Profile {
     p.missions = Array.isArray(s.missions) ? (s.missions as MissionSave[]) : [];
     const st = (s.stats && typeof s.stats === 'object' ? s.stats : {}) as Record<string, unknown>;
     for (const k of Object.keys(p.stats) as (keyof LifetimeStats)[]) p.stats[k] = num(st[k]);
+    const sh = (s.shop && typeof s.shop === 'object' ? s.shop : {}) as Record<string, unknown>;
+    const strings = (v: unknown): string[] => (Array.isArray(v) ? [...new Set(v.filter((x): x is string => typeof x === 'string'))] : []);
+    const counts = (v: unknown, max: number): Record<string, number> => {
+      const out: Record<string, number> = {};
+      if (v && typeof v === 'object') for (const [k, n] of Object.entries(v)) out[k] = Math.min(max, Math.floor(num(n)));
+      return out;
+    };
+    p.shop.owned = strings(sh.owned);
+    if (typeof sh.outfit === 'string') p.shop.outfit = sh.outfit;
+    if (typeof sh.trail === 'string') p.shop.trail = sh.trail;
+    p.shop.upgrades = counts(sh.upgrades, 5);
+    p.shop.boosts = counts(sh.boosts, 99);
+    p.shop.armed = strings(sh.armed);
     return p;
   }
 }

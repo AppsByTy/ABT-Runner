@@ -10,7 +10,7 @@ import { canvasTexture } from '../utils/textures';
 import { Particles, Shape } from './Particles';
 import type { PostFX } from './PostFX';
 import { SpeedLines } from './SpeedLines';
-import { Trail } from './Trails';
+import { Trail, TRAIL_STYLE } from './Trails';
 
 const LIME = '#b4ff1e';
 const GREEN = '#39ff6a';
@@ -84,7 +84,7 @@ export class FXDirector {
     seg(-0.42, 0.02, -0.12, -0.3, 12);
     seg(-0.12, -0.3, 0.48, 0.36, 22);
     this.checkPts = new Float32Array(pts);
-    this.trails = [new Trail(scene, MAGENTA, 0.08), new Trail(scene, MAGENTA, 0.08)];
+    this.trails = [new Trail(scene, 0.08), new Trail(scene, 0.08)];
     this.speedLines = new SpeedLines(scene);
     this.underglow = new THREE.PointLight(0x00e5ff, 2.2, 4.5, 2);
     scene.add(this.underglow);
@@ -518,7 +518,8 @@ export class FXDirector {
       }
     }
 
-    // Sneaker trails follow the mode colour.
+    // Sneaker trails (style from the shop).
+    TRAIL_STYLE.uTime.value += dt;
     const target = running && !pl.dead ? 1 : 0;
     this.trails.forEach((t, side) => {
       t.intensity += (target * (mode === 'boost' ? 1.8 : 1) - t.intensity) * Math.min(1, dt * 6);

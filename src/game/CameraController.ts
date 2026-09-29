@@ -17,6 +17,11 @@ export class CameraController {
   private deathBlend = 0;
   /** 1 = close-up menu framing on the character, 0 = chase camera. */
   private menuBlend = 1;
+  /** Shop open: frame the runner in the free screen area above the shop sheet. */
+  shopView = false;
+  /** Free area for the runner while shopping, as fractions of the screen height (top, bottom). */
+  shopBand: [number, number] = [0.08, 0.42];
+  private shopBlend = 0;
   /** Smoothed base FOV (speed/aspect), before transient kicks. */
   private fovBase: number = C.fov;
   private fovKick = 0;
@@ -116,13 +121,30 @@ export class CameraController {
     const portrait = this.aspect < 1;
     const mx = player.x + (portrait ? 0.45 : 0.2);
     const my = portrait ? 1.2 : 1.25;
-    const mz = portrait ? 4.6 : 3.6;
+    this.shopBlend += ((this.shopView ? 1 : 0) - this.shopBlend) * damp(4, dt);
+    const sb = this.shopBlend * this.shopBlend * (3 - 2 * this.shopBlend) * mb;
+    // Portrait shop: fit Ty (about 1.95 m tall) into the band between the
+    // header and the sheet. Distance sets his size; tilting the view down by
+    // the band's offset from the screen centre moves him up into it.
+    // Landscape: he already stands left of the right-hand sheet.
+    let shopZ = 0.5;
+    let shopLook = 0.1;
+    if (portrait) {
+      const T = Math.tan(THREE.MathUtils.degToRad(this.baseFov() * 0.75) / 2);
+      const yTop = 1 - 2 * this.shopBand[0];
+      const yBot = 1 - 2 * this.shopBand[1];
+      const dist = 1.95 / (Math.max(0.2, (yTop - yBot) * 0.84) * T);
+      const axis = Math.atan((1.0 - my) / dist) - Math.atan(((yTop + yBot) / 2) * T);
+      shopZ = dist - 4.6;
+      shopLook = 0.8 - (my + dist * Math.tan(axis));
+    }
+    const mz = (portrait ? 4.6 : 3.6) + shopZ * sb;
     this.pos.x += (cx + (mx - cx) * mb - this.pos.x) * k;
     this.pos.y += (cy + (my - cy) * mb - this.pos.y) * k;
     this.pos.z = cz + (mz - cz) * mb;
     // Landscape: Ty sits left of centre, leaving room for the start text on the right.
     const lx = tx + (player.x + (portrait ? 0 : 1.15) - tx) * mb;
-    const ly = C.lookHeight + ty + ((portrait ? 0.8 : 1.2) - C.lookHeight - ty) * mb;
+    const ly = C.lookHeight + ty + ((portrait ? 0.8 : 1.2) - C.lookHeight - ty) * mb - shopLook * sb;
     this.look.x += (lx - this.look.x) * k;
     this.look.y += (ly + boss * 3.4 + pw * 0.4 - this.look.y) * k;
     this.look.z = -C.lookAhead * (1 - mb) * (1 + boss * 1.2);

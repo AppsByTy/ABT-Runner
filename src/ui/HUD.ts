@@ -2,6 +2,7 @@ import { audio } from '../audio/AudioManager';
 import type { GameState } from '../core/GameState';
 import type { LevelInfo } from '../core/Profile';
 import type { MissionResult, MissionView } from '../game/Missions';
+import type { BoostDef, BoostId } from '../game/Shop';
 import { POWER_INFO, type PowerType } from '../world/Pickups';
 
 export interface HudStats {
@@ -57,6 +58,8 @@ export interface ProfileView {
   missions: MissionView[];
   /** First runs: keep the how-to-play legend on the menu. */
   newPlayer: boolean;
+  /** Boosts in stock, for the quick on/off chips. */
+  boosts: { def: BoostDef; count: number; armed: boolean }[];
 }
 
 const CHECK = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l5 5L20 6.5"/></svg>';
@@ -92,6 +95,9 @@ export class HUD {
   onPause: () => void = () => {};
   onMenu: () => void = () => {};
   onMute: () => void = () => {};
+  onShop: () => void = () => {};
+  onProfile: () => void = () => {};
+  onToggleBoost: (id: BoostId) => void = () => {};
 
   constructor(parent: HTMLElement) {
     this.root = document.createElement('div');
@@ -155,7 +161,7 @@ export class HUD {
       <div class="fps" id="h-fps"></div>
 
       <div class="menu" id="p-ready">
-        <div class="prof" id="p-prof">
+        <div class="prof" id="p-prof" data-ui role="button" aria-label="Profile">
           <div class="lvl-badge"><small>LV</small><b id="p-lvl">1</b></div>
           <div class="prof-mid">
             <div class="prof-rank" id="p-rank">INTERN</div>
@@ -181,7 +187,12 @@ export class HUD {
             <span><i class="dot r"></i>Avoid red errors</span>
             <span><i class="dot y"></i>Grab power-ups</span>
           </div>
-          <div class="tap" id="p-tap">TAP TO START</div>
+          <div class="bchips" id="p-boosts"></div>
+          <div class="menu-nav">
+            <button class="nav-btn" id="b-shop" data-ui aria-label="Shop"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16l-1.5 12.5a1.5 1.5 0 0 1-1.5 1.5H7a1.5 1.5 0 0 1-1.5-1.5z"/><path d="M9 10V6a3 3 0 0 1 6 0v4"/></svg><span>SHOP</span></button>
+            <div class="tap" id="p-tap">TAP TO START</div>
+            <button class="nav-btn" id="b-profile" data-ui aria-label="Profile"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg><span>PROFILE</span></button>
+          </div>
           <div class="controls">Swipe / arrows: <b>←→</b> lane · <b>↑</b> jump · <b>↓</b> slide</div>
           <div class="best">HIGH SCORE <b id="p-best">0</b></div>
         </div>
@@ -273,6 +284,17 @@ export class HUD {
     this.$('b-quit').addEventListener('click', () => this.onMenu());
     this.$('b-restart').addEventListener('click', () => this.onRestart());
     this.$('b-menu').addEventListener('click', () => this.onMenu());
+    this.$('b-shop').addEventListener('click', () => this.onShop());
+    this.$('b-profile').addEventListener('click', () => this.onProfile());
+    this.$('p-prof').addEventListener('click', () => this.onProfile());
+    this.$('p-boosts').addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLElement>('[data-b]');
+      if (b) this.onToggleBoost(b.dataset.b as BoostId);
+    });
+    // Menu buttons: a tap on them must not also start a run.
+    for (const id of ['b-shop', 'b-profile', 'p-prof', 'p-boosts']) {
+      this.$(id).addEventListener('pointerdown', (e) => e.stopPropagation());
+    }
     this.initSettings();
 
     const popups = this.$('h-popups');
@@ -631,6 +653,16 @@ export class HUD {
     this.$('p-mlist').innerHTML = missionRows(v.missions);
     this.$('p-mfoot').textContent = v.mult < 30 ? `Finish all three: score ×${v.mult + 1} for good` : 'Max multiplier reached';
     this.$('p-legend').style.display = v.newPlayer ? '' : 'none';
+    const chips = this.$('p-boosts');
+    chips.innerHTML = v.boosts
+      .map((b) => `<button class="bchip${b.armed ? ' on' : ''}" data-b="${b.def.id}" data-ui aria-pressed="${b.armed}"><i></i>${b.def.name}<b>×${b.count}</b></button>`)
+      .join('');
+    chips.style.display = v.boosts.length ? '' : 'none';
+  }
+
+  /** A settings panel is open over the menu (taps must not start a run). */
+  get modalOpen(): boolean {
+    return this.$('p-settings').classList.contains('show');
   }
 
   showPauseMissions(list: MissionView[]): void {

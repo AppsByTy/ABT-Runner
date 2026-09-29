@@ -11,10 +11,27 @@ const NONE: ReadonlySet<PickupKind> = new Set();
  */
 export class PowerUps {
   private readonly timers = new Map<PowerType, number>();
+  /** Full length of each running power-up (for the HUD bars). */
+  private readonly full = new Map<PowerType, number>();
+  /** Shop upgrades: duration multiplier per power-up. */
+  private mults: Partial<Record<PowerType, number>> = {};
 
-  activate(type: PowerType): void {
+  setDurationMults(m: Partial<Record<PowerType, number>>): void {
+    this.mults = { ...m };
+  }
+
+  /** Seconds a pickup of this power-up lasts (upgrades included). */
+  duration(type: PowerType): number {
+    return POWER_INFO[type].duration * (this.mults[type] ?? 1);
+  }
+
+  /** @param seconds override (start-of-run boosts) */
+  activate(type: PowerType, seconds?: number): void {
     const fresh = !this.timers.has(type);
-    this.timers.set(type, POWER_INFO[type].duration);
+    // A refresh never shortens what is left (e.g. a start-of-run shield).
+    const d = Math.max(seconds ?? this.duration(type), this.timers.get(type) ?? 0);
+    this.timers.set(type, d);
+    this.full.set(type, Math.max(d, fresh ? 0 : (this.full.get(type) ?? 0)));
     events.emit('powerStart', { type, fresh });
   }
 
@@ -25,7 +42,7 @@ export class PowerUps {
   /** 0..1 time remaining. */
   frac(type: PowerType): number {
     const t = this.timers.get(type);
-    return t === undefined ? 0 : t / POWER_INFO[type].duration;
+    return t === undefined ? 0 : t / (this.full.get(type) ?? POWER_INFO[type].duration);
   }
 
   /** Firewall absorbs a hit. Returns true if it did. */
@@ -75,6 +92,7 @@ export class PowerUps {
       const left = t - dt;
       if (left <= 0) {
         this.timers.delete(type);
+        this.full.delete(type);
         events.emit('powerEnd', { type, reason: 'expired' });
       } else this.timers.set(type, left);
     }
@@ -82,5 +100,6 @@ export class PowerUps {
 
   reset(): void {
     this.timers.clear();
+    this.full.clear();
   }
 }

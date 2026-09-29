@@ -74,6 +74,7 @@ Tests (need `npx playwright install chromium` once, and the dev server running):
 npm run test:play       # fairness solver (40 seeds x 9 km) + keyboard/touch controls
 npm run test:scenarios  # 15 scripted checks: dodge/jump/slide, near misses, damage, power-ups, boss, crash
 npm run test:progression # saves, migration, levels, coin bank, missions, set payout -> multiplier
+npm run test:shop        # buying, level locks, outfits, trails, upgrades, boosts, shop/profile screens, saves
 npm run test:bot        # lockstep autopilot across 24 seeds, prints balance stats
 npm run test:shots      # screenshots of key moments into shots/
 npm run test:gpu-reset  # a GPU reset mid-run must pause + recover in place, never reload
@@ -116,6 +117,23 @@ lifetime XP and coins) are carried over automatically.
 - **Where you see it:** the menu shows level, XP bar, bank and missions; pause shows mission progress; the results
   screen fills the XP bar (LEVEL UP), shows coins banked, ticks off finished missions and announces a completed set.
 
+## Shop
+
+SHOP on the menu (`src/game/Shop.ts` rules + catalog, `src/ui/ShopUI.ts` screen). Coins are fictional and only
+earned by playing; there is no real money anywhere. Buying takes two taps (price, then CONFIRM).
+
+- **Outfits** (8): recolour Ty's hoodie and accents (kicks, hair streak). Tap one to try it on the 3D runner before
+  buying. The recolour is a hue key in the avatar shader driven by uniforms, so changing outfit never compiles a shader.
+- **Trails** (7): sneaker light-trail colours, including an RGB cycle.
+- **Upgrades**: DEBUG MODE, CODE BOOST, BUG MAGNET, RAM BOOST and FIREWALL, 5 levels each, +15% duration per level
+  (300 / 700 / 1,500 / 3,000 / 6,000 coins).
+- **Boosts** (one run each, switched on/off with the chips above TAP TO START):
+  HEAD START (8 s of CODE BOOST), FIREWALL START (shield until the first hit), DOUBLE SCORE (×2 for the first
+  1,000 m), SYSTEM BACKUP (at 0% health you're restored to 50% and the hazards ahead are cleared; one per run,
+  only used up if it saves you).
+- Some cosmetics unlock at a player level. **PROFILE** (menu, or tap the level strip) shows rank, multiplier and
+  lifetime stats.
+
 ## Structure
 
 ```
@@ -123,7 +141,7 @@ src/
   core/    GameManager (state machine + loop), Config (all tuning), Theme (stages + shared shader palette),
            EventBus, GameState, Profile (saved progress: level, bank, best, missions, stats)
   game/    PlayerController, Character (procedural rig), CameraController, ComboSystem,
-           ObstacleWatcher (clears / near misses), PowerUps, VirusBoss, Missions
+           ObstacleWatcher (clears / near misses), PowerUps, VirusBoss, Missions, Shop
   world/   Track (data streams + motherboard), ComputerWorld (instanced districts, holo windows, core),
            Obstacles (hazards + bad bugs), Pickups (collectibles, good bugs, power-ups), Spawner (fair generation)
   render/  Quality (tiers), MaterialLib (procedural PBR), Environment (PMREM), Reflection (planar mirror),
@@ -131,9 +149,9 @@ src/
   fx/      PostFX (DOF, bloom, motion blur, glitch, grade), FXDirector (event → effects), Particles (shaped sprites), Trails, SpeedLines
   audio/   AudioManager (buses, modes, beat sync, SFX), HipHopEngine (procedural soundtrack), synth (instruments), MusicFiles (drop-in tracks)
   ui/      HUD (glass dashboard, bug-fix cards, banners, missions, sound settings, SYSTEM FAILURE, reboot),
-           premium.css, progression.css
+           ShopUI (shop + profile screens), premium.css, progression.css, shop.css
 assets/music/  drop-in soundtrack files
-scripts/   playtest, scenarios, progression, bot, shot (+ lib), check-gpu-reset, check-shader-stalls, build-single
+scripts/   playtest, scenarios, progression, shop, bot, shot (+ lib), check-gpu-reset, check-shader-stalls, build-single
 ```
 
 Key decisions:

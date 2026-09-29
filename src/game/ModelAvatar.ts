@@ -51,6 +51,55 @@ const OUTLINE_VERT = /* glsl */ `
   uniform float uOutline;
 `;
 
+/**
+ * Outfit colours (shop). The texture's lime hoodie and magenta accents
+ * (kicks, hair streak) are keyed by hue and repainted in the shader, keeping
+ * the texture's shading. Uniforms only: changing outfit never compiles a
+ * shader. `*On` = 0 leaves the original colours untouched.
+ */
+export const OUTFIT = {
+  hoodie: { value: new THREE.Color() },
+  accent: { value: new THREE.Color() },
+  hoodieOn: { value: 0 },
+  accentOn: { value: 0 },
+};
+
+const OUTFIT_GLSL = /* glsl */ `
+uniform vec3 uOHoodie;
+uniform vec3 uOAccent;
+uniform float uOHoodieOn;
+uniform float uOAccentOn;
+vec3 oHsv(vec3 c) {
+  vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
+  vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
+  vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
+  float d = q.x - min(q.w, q.y);
+  return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + 1e-10)), d / (q.x + 1e-10), q.x);
+}
+float oHue(float h, float centre, float width) {
+  float d = abs(fract(h - centre + 0.5) - 0.5);
+  return 1.0 - smoothstep(width * 0.6, width, d);
+}
+vec3 outfitRecolor(vec3 t) {
+  vec3 hsv = oHsv(sqrt(max(t, vec3(0.0))));
+  float keyed = smoothstep(0.30, 0.48, hsv.y) * smoothstep(0.12, 0.28, hsv.z);
+  float lime = oHue(hsv.x, 0.22, 0.085) * keyed * uOHoodieOn;
+  float mag = oHue(hsv.x, 0.885, 0.075) * keyed * uOAccentOn;
+  float v = max(max(t.r, t.g), t.b);
+  vec3 h = min(uOHoodie * clamp(v / 0.72, 0.0, 1.5), vec3(1.0));
+  vec3 a = min(uOAccent * clamp(v / 0.57, 0.0, 1.5), vec3(1.0));
+  return mix(mix(t, h, lime), a, mag);
+}
+`;
+
+const MAP_RECOLOR = /* glsl */ `
+#ifdef USE_MAP
+  vec4 sampledDiffuseColor = texture2D( map, vMapUv );
+  sampledDiffuseColor.rgb = outfitRecolor( sampledDiffuseColor.rgb );
+  diffuseColor *= sampledDiffuseColor;
+#endif
+`;
+
 export class ModelAvatar {
   /** Add to the character body group; rotated to face the run direction. */
   readonly root = new THREE.Group();
@@ -90,7 +139,17 @@ export class ModelAvatar {
         mat.map.colorSpace = THREE.SRGBColorSpace;
         mat.map.anisotropy = 8;
       }
+      mat.onBeforeCompile = (shader) => {
+        shader.uniforms.uOHoodie = OUTFIT.hoodie;
+        shader.uniforms.uOAccent = OUTFIT.accent;
+        shader.uniforms.uOHoodieOn = OUTFIT.hoodieOn;
+        shader.uniforms.uOAccentOn = OUTFIT.accentOn;
+        shader.fragmentShader = shader.fragmentShader
+          .replace('#include <common>', `#include <common>\n${OUTFIT_GLSL}`)
+          .replace('#include <map_fragment>', MAP_RECOLOR);
+      };
       mesh.material = rimify(mat, '#9fe8ff', 0.45, 2.6);
+      mat.customProgramCacheKey = () => 'avatar-outfit-rim';
       if (mesh.isSkinnedMesh) this.addOutline(mesh);
     });
 

@@ -1,0 +1,671 @@
+/*
+ * Phase 5: shop sheet, PROFILE screen, menu buttons and boost chips.
+ * Same rule as the rest of the UI: nothing restyles per frame, and every
+ * animation is opacity/transform only.
+ */
+
+/* ------------------------------------------------------------ menu */
+
+.menu.show .prof,
+.menu.show .nav-btn,
+.menu.show .bchip {
+  pointer-events: auto;
+}
+
+.prof {
+  cursor: pointer;
+}
+
+.prof:active {
+  transform: scale(0.98);
+}
+
+.menu-nav {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr) 62px;
+  align-items: center;
+  gap: 8px;
+  width: min(100%, 400px);
+}
+
+.menu-nav .tap {
+  text-align: center;
+  white-space: nowrap;
+  letter-spacing: 4px;
+}
+
+.nav-btn {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  padding: 8px 0 7px;
+  border-radius: 15px;
+  font: 700 9px/1 var(--ui);
+  letter-spacing: 1.5px;
+  color: #e8f6ff;
+  background: var(--glass);
+  border: 1px solid var(--glass-edge);
+  box-shadow: var(--glass-hi), var(--glass-shadow);
+  backdrop-filter: blur(14px) saturate(170%);
+  -webkit-backdrop-filter: blur(14px) saturate(170%);
+  cursor: pointer;
+}
+
+#b-shop {
+  color: var(--gold);
+  border-color: rgba(255, 210, 58, 0.5);
+}
+
+.nav-btn:active {
+  transform: scale(0.94);
+}
+
+.bchips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  max-width: 400px;
+}
+
+.bchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px 6px 8px;
+  border-radius: 999px;
+  font: 700 10px/1 var(--ui);
+  letter-spacing: 1.2px;
+  color: #a9c2d6;
+  background: rgba(2, 8, 20, 0.62);
+  border: 1px solid rgba(170, 225, 255, 0.25);
+  cursor: pointer;
+}
+
+.bchip i {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+}
+
+.bchip b {
+  font: 800 10px/1 var(--mono);
+  color: #fff;
+}
+
+.bchip.on {
+  color: #041008;
+  background: linear-gradient(135deg, #d8ff5a, #b4ff1e 50%, #3dffb0);
+  border-color: transparent;
+}
+
+.bchip.on i {
+  background: #041008;
+  border-color: #041008;
+}
+
+.bchip.on b {
+  color: #041008;
+}
+
+.bchip:active {
+  transform: scale(0.95);
+}
+
+/* Menu underneath the shop / profile. */
+.hud.shop-open #p-ready {
+  opacity: 0;
+  visibility: hidden;
+}
+
+.hud.profile-open .menu .brand,
+.hud.profile-open .menu .menu-bottom,
+.hud.profile-open .menu .prof {
+  opacity: 0.12;
+  transition: opacity 0.25s;
+}
+
+.hud.profile-open .menu .prof,
+.hud.profile-open .menu .nav-btn,
+.hud.profile-open .menu .bchip {
+  pointer-events: none;
+}
+
+/* ------------------------------------------------------------ shop */
+
+.coin-ico {
+  flex: none;
+}
+
+.ci {
+  display: inline-block;
+  flex: none;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #fff4b8, var(--gold) 45%, #c98a00);
+}
+
+.shop {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.3s, visibility 0.3s;
+}
+
+.shop.show {
+  opacity: 1;
+  visibility: visible;
+}
+
+.shop.show .shop-top,
+.shop.show .shop-sheet {
+  pointer-events: auto;
+}
+
+.shop-top {
+  position: absolute;
+  top: calc(var(--safe-top) + 10px);
+  left: calc(var(--safe-left) + 12px);
+  right: calc(var(--safe-right) + 12px);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.shop-title {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.shop-title b {
+  font: 400 30px/1 var(--display);
+  letter-spacing: 5px;
+  color: #fff;
+  text-shadow: 0 0 14px rgba(0, 229, 255, 0.6);
+}
+
+.shop-cap {
+  font: 700 9px/1 var(--ui);
+  letter-spacing: 2px;
+  color: #9fb8cf;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  transition: opacity 0.25s;
+}
+
+.shop-cap.show {
+  opacity: 1;
+}
+
+.shop-cap em {
+  font-style: normal;
+  color: var(--cyan);
+}
+
+.shop-bank {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 12px;
+  border-radius: 14px;
+  font: 800 17px/1 var(--mono);
+  color: #fff;
+  background: rgba(2, 8, 20, 0.7);
+  border: 1px solid rgba(255, 210, 58, 0.5);
+  font-variant-numeric: tabular-nums;
+}
+
+.shop-bank .coin-ico {
+  font-size: 16px;
+}
+
+.shop-sheet {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 58%;
+  display: flex;
+  flex-direction: column;
+  padding: 12px calc(var(--safe-right) + 12px) 0 calc(var(--safe-left) + 12px);
+  border-radius: 24px 24px 0 0;
+  background: linear-gradient(160deg, rgba(24, 44, 78, 0.8), rgba(4, 10, 24, 0.92) 55%);
+  border: 1px solid var(--glass-edge);
+  border-bottom: 0;
+  box-shadow: var(--glass-hi), 0 -10px 30px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(18px) saturate(180%);
+  -webkit-backdrop-filter: blur(18px) saturate(180%);
+  transform: translateY(30px);
+  transition: transform 0.35s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+
+.shop.show .shop-sheet {
+  transform: none;
+}
+
+.shop-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.38);
+}
+
+.stab {
+  min-height: 38px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  font: 700 10.5px/1 var(--ui);
+  letter-spacing: 1.2px;
+  color: #9fb8cf;
+  background: transparent;
+  cursor: pointer;
+}
+
+.stab.on {
+  color: #041008;
+  background: linear-gradient(135deg, #d8ff5a, #b4ff1e 50%, #3dffb0);
+}
+
+.shop-grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
+  gap: 8px;
+  padding: 10px 0 calc(var(--safe-bottom) + 14px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+}
+
+.it {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  justify-items: center;
+  gap: 6px;
+  padding: 9px 8px 8px;
+  border-radius: 16px;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(170, 225, 255, 0.16);
+  cursor: pointer;
+}
+
+.it.sel {
+  background: rgba(0, 229, 255, 0.09);
+  border-color: rgba(0, 229, 255, 0.8);
+}
+
+.it.equipped {
+  border-color: rgba(180, 255, 30, 0.75);
+}
+
+.it.bought {
+  animation: itBought 0.5s cubic-bezier(0.2, 1.5, 0.4, 1);
+}
+
+@keyframes itBought {
+  0% {
+    transform: scale(0.9);
+  }
+  60% {
+    transform: scale(1.04);
+  }
+}
+
+.it-sw {
+  display: grid;
+  place-items: center;
+  height: 48px;
+}
+
+.it.locked .it-sw {
+  opacity: 0.45;
+}
+
+.it-info {
+  display: grid;
+  align-content: start;
+  gap: 3px;
+  min-width: 0;
+}
+
+.it-name {
+  font: 700 11.5px/1.15 var(--ui);
+  letter-spacing: 1px;
+  color: #fff;
+}
+
+.it-desc {
+  font: 500 10px/1.3 var(--ui);
+  color: #9fb8cf;
+}
+
+.pips {
+  display: flex;
+  justify-content: center;
+  gap: 3px;
+  margin-top: 3px;
+}
+
+.pips i {
+  width: 14px;
+  height: 5px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.pips i.on {
+  background: var(--lime);
+  box-shadow: 0 0 6px rgba(180, 255, 30, 0.6);
+}
+
+.stock {
+  margin-top: 2px;
+  font: 800 9.5px/1.2 var(--mono);
+  letter-spacing: 0.5px;
+  color: var(--gold);
+}
+
+.it-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: 100%;
+  min-height: 36px;
+  padding: 0 6px;
+  border-radius: 10px;
+  font: 800 11px/1 var(--mono);
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(170, 225, 255, 0.2);
+  cursor: pointer;
+}
+
+.it-btn:active:not(:disabled) {
+  transform: scale(0.95);
+}
+
+.it-btn.buy {
+  background: rgba(255, 210, 58, 0.12);
+  border-color: rgba(255, 210, 58, 0.55);
+}
+
+.it-btn.poor {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.it-btn.confirm {
+  color: #1a1000;
+  background: linear-gradient(90deg, #ffb800, #ffe066);
+  border-color: transparent;
+}
+
+.it-btn.equip {
+  color: #041008;
+  background: linear-gradient(135deg, #d8ff5a, #b4ff1e 50%, #3dffb0);
+  border-color: transparent;
+}
+
+.it-btn.equipped {
+  color: var(--lime);
+  background: transparent;
+  border-color: rgba(180, 255, 30, 0.35);
+  cursor: default;
+}
+
+.it-btn.locked {
+  color: #9fb8cf;
+  background: rgba(0, 0, 0, 0.3);
+  border-color: rgba(255, 255, 255, 0.1);
+  cursor: default;
+}
+
+/* Swatches */
+.sw-outfit {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 34% 30%, rgba(255, 255, 255, 0.5), transparent 46%), var(--a);
+  box-shadow: inset 0 -5px 9px rgba(0, 0, 0, 0.35), 0 0 0 2px rgba(255, 255, 255, 0.12);
+}
+
+.sw-outfit b {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--b);
+  border: 2px solid #0a1424;
+}
+
+.sw-trail {
+  width: 70px;
+  height: 10px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, transparent, var(--a));
+  box-shadow: 0 0 12px var(--a);
+  transform: skewX(-24deg);
+}
+
+.sw-trail.rgb {
+  background: linear-gradient(90deg, #ff2a4a, #ffd23a, #b4ff1e, #00e5ff, #9a6bff, #ff2bd6);
+  box-shadow: 0 0 12px rgba(255, 255, 255, 0.5);
+}
+
+.sw-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  color: var(--a);
+  background: rgba(0, 0, 0, 0.35);
+  border: 1.5px solid var(--a);
+}
+
+/* ------------------------------------------------------------ profile */
+
+.panel.profile {
+  z-index: 30;
+  display: grid;
+  gap: 12px;
+}
+
+.pf-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.pf-mid {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.pf-rank {
+  font: 400 22px/1 var(--display);
+  letter-spacing: 2px;
+  color: #fff;
+}
+
+.pf-xp {
+  font: 500 10px/1 var(--mono);
+  color: #9fb8cf;
+}
+
+.pf-chips {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.pf-chips div,
+.pf-stats div {
+  min-width: 0;
+  border-radius: 11px;
+  background: rgba(0, 0, 0, 0.26);
+  border: 1px solid rgba(170, 225, 255, 0.14);
+}
+
+.pf-chips div {
+  display: grid;
+  gap: 5px;
+  padding: 8px 9px;
+}
+
+.pf-chips span,
+.pf-stats span {
+  font: 700 8.5px/1.1 var(--ui);
+  letter-spacing: 1.1px;
+  color: #9fb8cf;
+}
+
+.pf-chips b {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font: 800 15px/1 var(--mono);
+  color: #fff;
+}
+
+.pf-chips div:first-child b {
+  color: var(--gold);
+}
+
+.pf-chips .coin-ico {
+  font-size: 14px;
+}
+
+.pf-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.pf-stats div {
+  display: grid;
+  gap: 4px;
+  padding: 7px 10px;
+}
+
+.pf-stats b {
+  font: 800 13px/1 var(--mono);
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.panel.profile .btn.primary {
+  margin-top: 2px;
+}
+
+/* ------------------------------------------------------------ sizes */
+
+@media (max-height: 760px) and (max-aspect-ratio: 1/1) {
+  .menu .controls {
+    display: none;
+  }
+
+  .shop-sheet {
+    height: 56%;
+  }
+
+  .it {
+    gap: 5px;
+    padding: 8px 7px 7px;
+  }
+
+  .it-sw {
+    height: 46px;
+  }
+
+  .sw-outfit,
+  .sw-icon {
+    width: 42px;
+    height: 42px;
+  }
+
+  .it-btn {
+    min-height: 34px;
+  }
+
+  .panel.profile {
+    gap: 10px;
+  }
+}
+
+@media (min-aspect-ratio: 1/1) {
+  .shop-sheet {
+    left: auto;
+    top: calc(var(--safe-top) + 64px);
+    width: min(56vw, 600px);
+    height: auto;
+    padding-bottom: 0;
+    border-radius: 24px 0 0 0;
+    transform: translateX(30px);
+  }
+
+  .shop-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-aspect-ratio: 1/1) and (max-height: 600px) {
+  .menu .controls {
+    display: none;
+  }
+
+  .panel.profile {
+    width: min(94vw, 760px);
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+    column-gap: 16px;
+    align-items: start;
+    padding: 14px 16px;
+  }
+
+  .panel.profile .pf-head,
+  .panel.profile .pf-chips,
+  .panel.profile .btn {
+    grid-column: 1;
+  }
+
+  .panel.profile .pf-stats {
+    grid-column: 2;
+    grid-row: 1 / span 3;
+  }
+
+  .it-sw {
+    height: 44px;
+  }
+
+  .sw-outfit,
+  .sw-icon {
+    width: 40px;
+    height: 40px;
+  }
+}

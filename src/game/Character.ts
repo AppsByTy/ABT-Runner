@@ -6,7 +6,7 @@ import { rimify } from '../utils/rim';
 import { canvasTexture } from '../utils/textures';
 import { damp, clamp } from '../utils/math';
 import type { MaterialLib } from '../render/MaterialLib';
-import type { ModelAvatar } from './ModelAvatar';
+import { OUTFIT, type ModelAvatar } from './ModelAvatar';
 
 /**
  * "Ty" – the AppsByTy developer. Fully procedural, but built like a modern
@@ -277,6 +277,25 @@ export class Character {
     return this.avatar !== null;
   }
 
+  /** Procedural-body materials an outfit repaints (fallback when the model can't load). */
+  private readonly outfitMats: { hoodie: THREE.MeshPhysicalMaterial; rib: THREE.MeshPhysicalMaterial; knit: THREE.MeshPhysicalMaterial };
+
+  /**
+   * Shop outfit: hoodie + accent colours, null = the original colours.
+   * Only uniforms / material colours change, so no shader is ever rebuilt.
+   */
+  applyOutfit(hoodie: string | null, accent: string | null): void {
+    OUTFIT.hoodieOn.value = hoodie ? 1 : 0;
+    OUTFIT.accentOn.value = accent ? 1 : 0;
+    if (hoodie) OUTFIT.hoodie.value.set(hoodie);
+    if (accent) OUTFIT.accent.value.set(accent);
+    const m = this.outfitMats;
+    m.hoodie.color.set(hoodie ?? C.hoodie);
+    m.rib.color.set(hoodie ?? C.hoodieDeep);
+    if (hoodie) m.rib.color.multiplyScalar(0.8);
+    m.knit.color.set(accent ?? C.knit);
+  }
+
   constructor(lib: MaterialLib) {
     const phys = (p: THREE.MeshPhysicalMaterialParameters, rim: THREE.ColorRepresentation, rs: number, rp = 3): THREE.MeshPhysicalMaterial =>
       rimify(new THREE.MeshPhysicalMaterial(p), rim, rs, rp);
@@ -318,6 +337,8 @@ export class Character {
       logoFront: new THREE.MeshPhysicalMaterial({ map: logoTexture(true), transparent: true, roughness: 0.6, sheen: 0.3, polygonOffset: true, polygonOffsetFactor: -2 }),
       logoBack: new THREE.MeshPhysicalMaterial({ map: logoTexture(false), transparent: true, roughness: 0.6, sheen: 0.3, polygonOffset: true, polygonOffsetFactor: -2 }),
     };
+
+    this.outfitMats = { hoodie: m.hoodie, rib: m.rib, knit: m.knit };
 
     const mesh = (geo: THREE.BufferGeometry, mat: THREE.Material, x = 0, y = 0, z = 0): THREE.Mesh => {
       const me = new THREE.Mesh(geo, mat);

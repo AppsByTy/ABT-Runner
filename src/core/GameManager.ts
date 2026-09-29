@@ -12,6 +12,7 @@ import { ObstacleWatcher } from '../game/ObstacleWatcher';
 import { PowerUps } from '../game/PowerUps';
 import { VirusBoss } from '../game/VirusBoss';
 import { Missions } from '../game/Missions';
+import { Shop } from '../game/Shop';
 import { Track } from '../world/Track';
 import { ComputerWorld } from '../world/ComputerWorld';
 import { ThemeLinks } from '../world/ThemeLinks';
@@ -25,6 +26,8 @@ import tyMeshUrl from '../assets/models/ty-mesh.glb?inline';
 import tyAlbedoUrl from '../assets/models/ty-albedo.jpg?inline';
 import { FXDirector } from '../fx/FXDirector';
 import { HUD, type ProgressReport } from '../ui/HUD';
+import { ProfileScreen, ShopUI } from '../ui/ShopUI';
+import { setTrailStyle } from '../fx/Trails';
 import { audio } from '../audio/AudioManager';
 import { clamp, makeAABB, overlapX, overlapZ, overlaps } from '../utils/math';
 import { QUALITY, loadQuality, type QualitySettings } from '../render/Quality';
@@ -88,6 +91,10 @@ export class GameManager {
   /** Saved progress: level, coin bank, best, missions, score multiplier. */
   readonly profile = new Profile();
   readonly missions = new Missions(this.profile);
+  /** Coin bank purchases: outfits, trails, power-up upgrades, boosts. */
+  readonly shop = new Shop(this.profile);
+  readonly shopUI: ShopUI;
+  readonly profileUI: ProfileScreen;
   readonly post: PostFX;
   private readonly watchdog: RenderWatchdog;
   private recoverStep = 0;
@@ -120,6 +127,10 @@ export class GameManager {
   hits = 0;
   /** Permanent score multiplier from missions, fixed for the whole run. */
   runMult = 1;
+  /** DOUBLE SCORE boost: ×2 until the first 1,000 m are done. */
+  scoreBoost = 1;
+  /** A SYSTEM BACKUP already saved this run (one per run). */
+  private backupUsed = false;
 
   /** When false the RAF loop idles and frames are driven via stepFrame(). */
   autoLoop = true;
@@ -261,6 +272,33 @@ export class GameManager {
     };
     this.hud.setMuted(audio.muted);
     this.hud.setFps(this.debug ? '—' : null);
+    this.shopUI = new ShopUI(this.hud.root, this.shop, {
+      previewOutfit: (id) => this.applyOutfit(id),
+      opened: (open, band) => {
+        this.cam.shopView = open;
+        this.cam.shopBand = band;
+      },
+      changed: () => {
+        this.applyCosmetics();
+        this.showProfile();
+      },
+    });
+    this.profileUI = new ProfileScreen(this.hud.root);
+    this.hud.onShop = () => {
+      if (this.state === GameState.Ready && !this.profileUI.isOpen) this.shopUI.open();
+    };
+    this.hud.onProfile = () => {
+      if (this.state !== GameState.Ready || this.shopUI.isOpen) return;
+      const p = this.profile.data;
+      this.profileUI.open({ level: this.profile.level, bank: p.bank, mult: p.mult, best: p.best, set: p.set, stats: p.stats });
+    };
+    this.hud.onToggleBoost = (id) => {
+      if (this.state !== GameState.Ready) return;
+      this.shop.toggleArm(id);
+      audio.play('ui');
+      this.showProfile();
+    };
+    this.applyCosmetics();
     this.setViewportSizes();
 
     this.input = new InputManager(container);
@@ -454,6 +492,8 @@ export class GameManager {
     this.player.reset();
     this.runMult = this.profile.data.mult;
     this.runLive = false;
+    this.scoreBoost = 1;
+    this.backupUsed = false;
     this.hud.setRunMult(this.runMult);
     const tutorial = this.tutorialOverride ?? this.profile.data.stats.runs < 2;
     this.spawner.reset(this.seed, tutorial);
@@ -520,14 +560,63 @@ export class GameManager {
 
   private beginRun(): void {
     this.runLive = true;
+    // Upgrades bought in the menu count from this run.
+    this.powers.setDurationMults(this.shop.durationMults());
     this.missions.beginRun();
     events.emit('runStart');
+    // Start-of-run boosts switched on in the menu.
+    for (const id of this.shop.startRun()) {
+      if (id === 'headstart') this.powers.activate('boost', 8);
+      else if (id === 'firewall') this.powers.activate('firewall', 9999);
+      else if (id === 'double') {
+        this.scoreBoost = 2;
+        this.hud.popup('DOUBLE SCORE · FIRST 1,000 m', 'pink', true);
+      }
+    }
+    if (this.shop.isArmed('backup')) this.hud.popup('SYSTEM BACKUP READY', 'green');
+  }
+
+  /** Shop outfit on the runner (also used for try-ons). */
+  private applyOutfit(id: string): void {
+    const o = this.shop.outfit(id);
+    this.player.character.applyOutfit(o.hoodie, o.accent);
+  }
+
+  /** Equipped outfit + trail. */
+  private applyCosmetics(): void {
+    this.applyOutfit(this.shop.outfit().id);
+    const t = this.shop.trail();
+    setTrailStyle(t.color, t.rainbow);
+  }
+
+  /**
+   * SYSTEM BACKUP: health hit 0 with a backup switched on - restore to half
+   * health, clear the hazards just ahead and give a moment of grace.
+   */
+  private restoreBackup(): boolean {
+    if (this.backupUsed || !this.shop.useBackup()) return false;
+    this.backupUsed = true;
+    this.heal(CONFIG.health.max / 2);
+    this.player.grace(2.5);
+    this.speedPenalty = 0;
+    this.obstacles.forEach((o) => {
+      const ahead = o.dist - this.distance;
+      if (o.destroyed || ahead < -1 || ahead > 45) return;
+      this.obstacles.destroy(o);
+      o.noScore = true;
+      events.emit('obstacleDeleted', { kind: o.kind, badBug: isBadBug(o.kind), x: o.x, y: o.cls === 'high' ? 1.8 : 0.5, z: -ahead });
+    });
+    this.post.glitch(0.8);
+    this.cam.shake(0.5);
+    this.hud.banner('SYSTEM BACKUP RESTORED', '50% HEALTH · HAZARDS CLEARED', 'green', 2.2);
+    audio.play('reboot');
+    return true;
   }
 
   /** Menu profile strip + missions (only redrawn on state changes, never per frame). */
   private showProfile(): void {
     const p = this.profile.data;
-    this.hud.setProfile({ level: this.profile.level, bank: p.bank, mult: p.mult, missions: this.missions.views(), newPlayer: p.stats.runs < 2 });
+    this.hud.setProfile({ level: this.profile.level, bank: p.bank, mult: p.mult, missions: this.missions.views(), newPlayer: p.stats.runs < 2, boosts: this.shop.stock() });
   }
 
   /**
@@ -569,6 +658,14 @@ export class GameManager {
   private handleInput(a: InputAction): void {
     switch (this.state) {
       case GameState.Ready:
+        // Shop / profile / sound settings open: taps belong to them; Esc closes.
+        if (this.shopUI.isOpen || this.profileUI.isOpen || this.hud.modalOpen) {
+          if (a === 'pause') {
+            this.shopUI.close();
+            this.profileUI.close();
+          }
+          return;
+        }
         if (a !== 'pause') this.start();
         return;
       case GameState.Playing:
@@ -625,7 +722,7 @@ export class GameManager {
   }
 
   get totalMult(): number {
-    return this.multiplier * this.powers.scoreMult * this.runMult;
+    return this.multiplier * this.powers.scoreMult * this.runMult * this.scoreBoost;
   }
 
   private addScore(points: number): void {
@@ -770,6 +867,10 @@ export class GameManager {
     this.prevDistance = this.distance;
     this.distance += this.speed * dt;
     this.score += this.speed * dt * this.totalMult * 0.5;
+    if (this.scoreBoost > 1 && this.distance >= 1000) {
+      this.scoreBoost = 1;
+      this.hud.popup('DOUBLE SCORE OVER', 'pink');
+    }
     // Distance XP: every stretch of track run is worth a little.
     const every = CONFIG.xp.distanceEvery;
     this.xp += Math.floor(this.distance / every) - Math.floor(this.prevDistance / every);
@@ -902,7 +1003,7 @@ export class GameManager {
       audio.play(graze ? 'graze' : 'hit');
     }
     events.emit('hit', { kind: o.kind, damage, health: this.health, absorbed, graze, x: o.x, y: o.cls === 'high' ? 1.6 : 0.4, z });
-    if (this.health <= 0) this.die(o);
+    if (this.health <= 0 && !this.restoreBackup()) this.die(o);
   }
 
   private checkPickups(): void {
@@ -1022,7 +1123,7 @@ export class GameManager {
       xp: this.xp,
       health: this.health,
       multiplier: this.multiplier,
-      powerMult: this.powers.scoreMult,
+      powerMult: this.powers.scoreMult * this.scoreBoost,
       combo: this.combo.combo,
       comboTimer: this.combo.timerFrac,
       tierProgress: this.combo.tierProgress,
@@ -1195,5 +1296,6 @@ export class GameManager {
     this.reflection?.setSize(w * this.pixelRatio, h * this.pixelRatio);
     this.setViewportSizes();
     this.cam.setAspect(w / h);
+    if (this.shopUI.isOpen) this.cam.shopBand = this.shopUI.band();
   };
 }
