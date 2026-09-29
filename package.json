@@ -11,6 +11,7 @@
     "test:play": "node scripts/playtest.mjs",
     "test:bot": "node scripts/bot.mjs",
     "test:scenarios": "node scripts/scenarios.mjs",
+    "test:progression": "node scripts/progression.mjs",
     "test:shots": "node scripts/shot.mjs shots",
     "test:gpu-reset": "node scripts/check-gpu-reset.mjs",
     "test:stalls": "node scripts/check-shader-stalls.mjs",

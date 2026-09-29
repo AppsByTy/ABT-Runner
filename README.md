@@ -33,8 +33,9 @@ Stability on phones:
   off-screen in the menu. One-shot effects are pooled, never created/destroyed per event.
 - **GPU reset recovery.** If iOS drops the WebGL context, the run pauses, graphics are rebuilt in place (baked
   lighting re-baked) and you resume where you were. The page is never reloaded.
-- **Beat sync never restyles the HUD.** The music's beat only changes opacity/transform on a few elements. Rewriting a
-  CSS variable / box-shadow / filter on the glass HUD every frame got the page killed by iOS Safari (found with the
+- **Nothing restyles the HUD per frame.** The music's beat only changes opacity/transform on a few elements, and every
+  looping UI animation (low-health pulse, NEW HIGH SCORE, mission cards) is opacity/transform only. Rewriting a CSS
+  variable / box-shadow / filter on the glass HUD every frame got the page killed by iOS Safari (found with the
   on-device crash tests in `src/dev/stress.ts`, built with `VITE_STRESS=1`).
 - **Flight recorder.** If the system kills the page mid-run, the next launch shows a short report (distance, FPS,
   whether the GPU had reset) so the cause is known.
@@ -72,6 +73,7 @@ Tests (need `npx playwright install chromium` once, and the dev server running):
 ```bash
 npm run test:play       # fairness solver (40 seeds x 9 km) + keyboard/touch controls
 npm run test:scenarios  # 15 scripted checks: dodge/jump/slide, near misses, damage, power-ups, boss, crash
+npm run test:progression # saves, migration, levels, coin bank, missions, set payout -> multiplier
 npm run test:bot        # lockstep autopilot across 24 seeds, prints balance stats
 npm run test:shots      # screenshots of key moments into shots/
 npm run test:gpu-reset  # a GPU reset mid-run must pause + recover in place, never reload
@@ -96,23 +98,42 @@ npm run build:single -- out.html "label"   # one self-contained HTML file (fonts
 - **Corruption stages:** Clean Computer → Minor Bugs → System Errors → Corrupted System → Virus Infection → Critical System Failure → THE CORE.
 - **THE VIRUS** (boss, from 1,350 m): survive its dropped packets and grab gold security patches until PATCHING SYSTEM hits 100% → VIRUS DELETED ✓.
 
+## Progression
+
+Everything is saved on the device (`src/core/Profile.ts`, one versioned localStorage record). Older saves (high score,
+lifetime XP and coins) are carried over automatically.
+
+- **Level and rank.** XP comes from bug fixes, XP files, chips, power-ups, the boss, finished missions and distance
+  (1 XP per 10 m). Level L needs `150 + 75 × (L − 1)` XP. Ranks: INTERN → JUNIOR DEV (3) → DEVELOPER (6) →
+  SENIOR DEV (10) → LEAD ENGINEER (15) → ARCHITECT (20) → CTO (30) → LEGEND (40). Each new level banks coins.
+- **Coin bank.** Coins from every run (also when you quit from pause) plus level and mission rewards. Fictional
+  currency, spent in the shop (Phase 5).
+- **Missions** (`src/game/Missions.ts`): three at a time, e.g. "Fix 5 bugs in one run", "Reach DEBUG COMBO x3",
+  "Run 2,000 m in total". "In one run" missions keep your best attempt; the rest add up across runs. Each one gives
+  XP when it's done (MISSION COMPLETE card). Finish all three and the set pays out: **score multiplier +1 for every
+  run after** (up to ×30) plus coins, and a harder set replaces it. The first three sets are fixed to teach the game;
+  later sets are generated from the set number, so they never change under you.
+- **Where you see it:** the menu shows level, XP bar, bank and missions; pause shows mission progress; the results
+  screen fills the XP bar (LEVEL UP), shows coins banked, ticks off finished missions and announces a completed set.
+
 ## Structure
 
 ```
 src/
   core/    GameManager (state machine + loop), Config (all tuning), Theme (stages + shared shader palette),
-           EventBus, GameState, BestScore (best + lifetime stats)
+           EventBus, GameState, Profile (saved progress: level, bank, best, missions, stats)
   game/    PlayerController, Character (procedural rig), CameraController, ComboSystem,
-           ObstacleWatcher (clears / near misses), PowerUps, VirusBoss
+           ObstacleWatcher (clears / near misses), PowerUps, VirusBoss, Missions
   world/   Track (data streams + motherboard), ComputerWorld (instanced districts, holo windows, core),
            Obstacles (hazards + bad bugs), Pickups (collectibles, good bugs, power-ups), Spawner (fair generation)
   render/  Quality (tiers), MaterialLib (procedural PBR), Environment (PMREM), Reflection (planar mirror),
            Watchdog (black-screen fallback, GPU reset hand-off, flight recorder)
   fx/      PostFX (DOF, bloom, motion blur, glitch, grade), FXDirector (event → effects), Particles (shaped sprites), Trails, SpeedLines
   audio/   AudioManager (buses, modes, beat sync, SFX), HipHopEngine (procedural soundtrack), synth (instruments), MusicFiles (drop-in tracks)
-  ui/      HUD (glass dashboard, bug-fix cards, banners, sound settings, SYSTEM FAILURE, reboot), premium.css
+  ui/      HUD (glass dashboard, bug-fix cards, banners, missions, sound settings, SYSTEM FAILURE, reboot),
+           premium.css, progression.css
 assets/music/  drop-in soundtrack files
-scripts/   playtest, scenarios, bot, shot (+ lib), check-gpu-reset, check-shader-stalls, build-single
+scripts/   playtest, scenarios, progression, bot, shot (+ lib), check-gpu-reset, check-shader-stalls, build-single
 ```
 
 Key decisions:

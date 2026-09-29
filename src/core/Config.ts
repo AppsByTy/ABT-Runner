@@ -126,6 +126,8 @@ export const CONFIG = {
     power: 5,
     boss: 200,
     badBugFixed: 15,
+    /** One XP per this many metres run. */
+    distanceEvery: 10,
   },
 
   nearMiss: {

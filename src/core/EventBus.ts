@@ -35,7 +35,8 @@ export interface GameEvents {
   materialize: { x: number; z: number; kind: ObstacleKind };
 
   obstacleCleared: At & { kind: ObstacleKind; how: 'jump' | 'slide' | 'dodge' };
-  nearMiss: At & { kind: ObstacleKind; style: 'lateral' | 'vertical' };
+  /** `how` is set for vertical near misses: jumped over / slid under. */
+  nearMiss: At & { kind: ObstacleKind; style: 'lateral' | 'vertical'; how?: 'jump' | 'slide' };
   combo: { combo: number; multiplier: number; points: number; label: string; levelUp: boolean };
   comboEnd: { combo: number; reason: 'timeout' | 'hit' | 'death' };
 
@@ -53,6 +54,11 @@ export interface GameEvents {
 
   death: { kind: ObstacleKind; score: number; distance: number };
   newBest: { score: number };
+
+  /** A mission was finished (mid-run, or as the run ended). */
+  missionComplete: { index: number; text: string; xp: number };
+  /** All three missions are done; `mult` is the score multiplier from the next run. */
+  missionSetComplete: { mult: number };
 }
 
 type Handler<T> = (payload: T) => void;

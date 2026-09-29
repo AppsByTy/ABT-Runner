@@ -1,5 +1,7 @@
 import { audio } from '../audio/AudioManager';
 import type { GameState } from '../core/GameState';
+import type { LevelInfo } from '../core/Profile';
+import type { MissionResult, MissionView } from '../game/Missions';
 import { POWER_INFO, type PowerType } from '../world/Pickups';
 
 export interface HudStats {
@@ -27,12 +29,48 @@ export interface GameOverData {
   bestCombo: number;
   bestMultiplier: number;
   xp: number;
-  health: number;
+  /** Mission score multiplier the run was played with. */
+  runMult: number;
   best: number;
   isNewBest: boolean;
   cause: string;
   stageName: string;
 }
+
+/** What the finished run did to the saved profile. */
+export interface ProgressReport extends MissionResult {
+  xpGained: number;
+  before: LevelInfo;
+  after: LevelInfo;
+  /** Coins banked for levels gained. */
+  levelCoins: number;
+  /** Coins added to the bank by this run (collected + level + set rewards). */
+  banked: number;
+  bank: number;
+  isNewBest: boolean;
+}
+
+export interface ProfileView {
+  level: LevelInfo;
+  bank: number;
+  mult: number;
+  missions: MissionView[];
+  /** First runs: keep the how-to-play legend on the menu. */
+  newPlayer: boolean;
+}
+
+const CHECK = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l5 5L20 6.5"/></svg>';
+
+/** Mission rows (menu, pause, results). Drawn only when the screen opens. */
+const missionRows = (list: MissionView[]): string =>
+  list
+    .map(
+      (m, i) =>
+        `<div class="ms${m.done ? ' done' : ''}${m.fresh ? ' fresh' : ''}" style="--i:${i}"><i class="ms-box">${m.done ? CHECK : ''}</i>` +
+        `<div class="ms-body"><span class="ms-text">${m.text}</span><i class="ms-bar"><b style="transform:scaleX(${(m.value / m.target).toFixed(3)})"></b></i></div>` +
+        `<em class="ms-val">${m.label}</em></div>`,
+    )
+    .join('');
 
 const fmt = (n: number): string => Math.floor(n).toLocaleString('en-US');
 
@@ -61,7 +99,7 @@ export class HUD {
     this.root.innerHTML = `
       <div class="dash" id="h-dash">
         <div class="dash-l">
-          <div class="lbl">SCORE</div>
+          <div class="lbl" id="h-slbl">SCORE</div>
           <div class="score" id="h-score">0</div>
           <div class="chips">
             <span class="chip bugs"><i class="dot g"></i>BUGS FIXED: <b id="h-bugs">0</b></span>
@@ -112,10 +150,20 @@ export class HUD {
       <div class="popups" id="h-popups"></div>
       <div class="banner" id="h-banner"><div class="b-title" id="h-btitle"></div><div class="b-sub" id="h-bsub"></div></div>
       <div class="hint" id="h-hint"></div>
+      <div class="m-toast" id="h-mtoast"><div class="mt-top">${CHECK}MISSION COMPLETE</div><div class="mt-text" id="h-mttext"></div><div class="mt-sub" id="h-mtsub"></div></div>
       <div class="crash-flash" id="h-crash">SYSTEM CRASHED</div>
       <div class="fps" id="h-fps"></div>
 
       <div class="menu" id="p-ready">
+        <div class="prof" id="p-prof">
+          <div class="lvl-badge"><small>LV</small><b id="p-lvl">1</b></div>
+          <div class="prof-mid">
+            <div class="prof-rank" id="p-rank">INTERN</div>
+            <div class="xpbar"><i id="p-xpfill"></i></div>
+            <div class="prof-xp" id="p-xp">0 / 150 XP</div>
+          </div>
+          <div class="prof-bank"><span class="coin-ico">A</span><b id="p-bank">0</b></div>
+        </div>
         <div class="brand">
           <div class="brand-top">AppsByTy<span>:</span></div>
           <h1 class="brand-title" id="p-title" data-text="CODE RUNNER">CODE RUNNER</h1>
@@ -123,7 +171,12 @@ export class HUD {
         </div>
         <button class="icon-btn menu-gear" data-ui id="b-settings" aria-label="Sound settings"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
         <div class="menu-bottom">
-          <div class="legend">
+          <div class="missions" id="p-missions">
+            <div class="ms-head"><span>MISSIONS</span><b id="p-mult">SCORE ×1</b></div>
+            <div class="ms-list" id="p-mlist"></div>
+            <div class="ms-foot" id="p-mfoot"></div>
+          </div>
+          <div class="legend" id="p-legend">
             <span><i class="dot g"></i>Fix green bugs</span>
             <span><i class="dot r"></i>Avoid red errors</span>
             <span><i class="dot y"></i>Grab power-ups</span>
@@ -136,6 +189,7 @@ export class HUD {
 
       <div class="panel paused" id="p-paused">
         <div class="term-title">&gt; process paused_</div>
+        <div class="missions compact"><div class="ms-head"><span>MISSIONS</span></div><div class="ms-list" id="p-pmlist"></div></div>
         <button class="btn primary" data-ui id="b-resume">RESUME</button>
         <button class="btn" data-ui id="b-psettings">SOUND</button>
         <button class="btn" data-ui id="b-quit">MAIN MENU</button>
@@ -155,23 +209,45 @@ export class HUD {
       </div>
 
       <div class="panel failure" id="p-over">
-        <div class="bsod-face">:(</div>
-        <h2 class="bsod-title">SYSTEM FAILURE</h2>
-        <div class="bsod-code">ERROR CODE: <b>0xAPPSBYTY</b></div>
-        <div class="bsod-cause" id="o-cause"></div>
-        <div class="new-best" id="o-newbest"><svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M12 2l3 7 7 .6-5.3 4.7L18.3 22 12 18l-6.3 4 1.6-7.7L2 9.6 9 9z"/></svg>NEW HIGH SCORE<svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M12 2l3 7 7 .6-5.3 4.7L18.3 22 12 18l-6.3 4 1.6-7.7L2 9.6 9 9z"/></svg></div>
-        <div class="rows">
-          <div class="row big"><span>SCORE</span><i></i><b id="o-score">0</b></div>
-          <div class="row"><span>BUGS FIXED</span><i></i><b id="o-bugs">0</b></div>
-          <div class="row"><span>DISTANCE</span><i></i><b id="o-dist">0 m</b></div>
-          <div class="row"><span>DEBUG COMBO</span><i></i><b id="o-combo">x1</b></div>
-          <div class="row"><span>COINS</span><i></i><b id="o-coins">0</b></div>
-          <div class="row"><span>XP EARNED</span><i></i><b id="o-xp">0</b></div>
-          <div class="row"><span>SYSTEM HEALTH</span><i></i><b id="o-health" class="bad">0%</b></div>
-          <div class="row"><span>HIGH SCORE</span><i></i><b id="o-best">0</b></div>
+        <div class="o-a">
+          <div class="bsod-head">
+            <div class="bsod-face">:(</div>
+            <div>
+              <h2 class="bsod-title">SYSTEM FAILURE</h2>
+              <div class="bsod-code">ERROR CODE: <b>0xAPPSBYTY</b></div>
+            </div>
+          </div>
+          <div class="bsod-cause" id="o-cause"></div>
+          <div class="new-best" id="o-newbest"><svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M12 2l3 7 7 .6-5.3 4.7L18.3 22 12 18l-6.3 4 1.6-7.7L2 9.6 9 9z"/></svg>NEW HIGH SCORE<svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M12 2l3 7 7 .6-5.3 4.7L18.3 22 12 18l-6.3 4 1.6-7.7L2 9.6 9 9z"/></svg></div>
+          <div class="o-score"><span>SCORE</span><b id="o-score">0</b><em id="o-smult"></em></div>
+          <div class="o-grid">
+            <div><span>DISTANCE</span><b id="o-dist">0 m</b></div>
+            <div><span>BUGS FIXED</span><b id="o-bugs">0</b></div>
+            <div><span>BEST COMBO</span><b id="o-combo">x1</b></div>
+            <div><span>COINS</span><b id="o-coins">0</b></div>
+            <div><span>XP EARNED</span><b id="o-xp">0</b></div>
+            <div><span>HIGH SCORE</span><b id="o-best">0</b></div>
+          </div>
         </div>
-        <button class="btn primary reboot" data-ui id="b-restart"><span><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>REBOOT SYSTEM</span><small>PLAY AGAIN</small></button>
-        <button class="btn" data-ui id="b-menu">MAIN MENU</button>
+        <div class="o-b">
+          <div class="o-prog">
+            <div class="o-lvl">
+              <div class="lvl-badge"><small>LV</small><b id="o-lvl">1</b></div>
+              <div class="o-lvl-mid">
+                <div class="o-rank"><span id="o-rank">INTERN</span><em id="o-xpnum">+0 XP</em></div>
+                <div class="xpbar"><i id="o-xpfill"></i></div>
+              </div>
+            </div>
+            <div class="o-levelup" id="o-levelup"></div>
+            <div class="o-bank"><span>COIN BANK</span><b><span class="coin-ico">A</span><span id="o-bank">0</span></b><em id="o-bankadd">+0</em></div>
+          </div>
+          <div class="missions over"><div class="ms-head"><span>MISSIONS</span><b id="o-mult"></b></div><div class="ms-list" id="o-mlist"></div></div>
+          <div class="o-set" id="o-set"></div>
+          <div class="o-btns">
+          <button class="btn primary reboot" data-ui id="b-restart"><span><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>REBOOT SYSTEM</span><small>PLAY AGAIN</small></button>
+          <button class="btn" data-ui id="b-menu">MAIN MENU</button>
+          </div>
+        </div>
       </div>
 
       <div class="boot-screen" id="p-reboot">
@@ -400,6 +476,10 @@ export class HUD {
       this.hintTimer -= dt;
       if (this.hintTimer <= 0) this.$('h-hint').classList.remove('show');
     }
+    if (this.toastTimer > 0) {
+      this.toastTimer -= dt;
+      if (this.toastTimer <= 0) this.nextToast();
+    }
   }
 
   /** Floating feedback text. Pooled DOM nodes, CSS animated. */
@@ -471,17 +551,113 @@ export class HUD {
     this.$('h-crash').classList.add('show');
   }
 
-  showGameOver(d: GameOverData): void {
+  /** Level-up / set-complete timers of the results screen. */
+  private overTimers: number[] = [];
+
+  showGameOver(d: GameOverData, r: ProgressReport): void {
     this.$('o-score').textContent = fmt(d.score);
+    this.$('o-smult').textContent = d.runMult > 1 ? `×${d.runMult} MISSION BONUS` : '';
     this.$('o-bugs').textContent = fmt(d.bugsFixed);
     this.$('o-dist').textContent = `${fmt(d.distance)} m`;
-    this.$('o-combo').textContent = `x${d.bestMultiplier}  (${d.bestCombo} chain)`;
+    this.$('o-combo').textContent = `x${d.bestMultiplier} · ${d.bestCombo}`;
     this.$('o-coins').textContent = fmt(d.coins);
     this.$('o-xp').textContent = fmt(d.xp);
-    this.$('o-health').textContent = `${Math.max(0, Math.round(d.health))}%`;
     this.$('o-best').textContent = fmt(d.best);
     this.$('o-cause').textContent = `${d.cause} · ${d.stageName}`;
     this.$('o-newbest').classList.toggle('show', d.isNewBest);
+
+    // Progression: XP bar (fills, and wraps on a level up), bank, missions, set payout.
+    for (const t of this.overTimers) window.clearTimeout(t);
+    this.overTimers = [];
+    const later = (ms: number, fn: () => void): void => void this.overTimers.push(window.setTimeout(fn, ms));
+    const fill = this.$('o-xpfill');
+    const up = this.$('o-levelup');
+    const setLevel = (l: LevelInfo): void => {
+      this.$('o-lvl').textContent = String(l.level);
+      this.$('o-rank').textContent = l.rank;
+    };
+    const fillTo = (frac: number, animate: boolean): void => {
+      fill.style.transition = animate ? 'transform 0.8s cubic-bezier(0.3, 0.7, 0.3, 1)' : 'none';
+      fill.style.transform = `scaleX(${frac.toFixed(3)})`;
+    };
+    setLevel(r.before);
+    fillTo(r.before.frac, false);
+    up.classList.remove('show');
+    this.$('o-xpnum').textContent = `+${fmt(r.xpGained)} XP`;
+    const leveled = r.after.level > r.before.level;
+    later(450, () => fillTo(leveled ? 1 : r.after.frac, true));
+    if (leveled) {
+      later(1300, () => {
+        fillTo(0, false);
+        void fill.offsetWidth;
+        fillTo(r.after.frac, true);
+        setLevel(r.after);
+        const n = r.after.level - r.before.level;
+        up.textContent = `LEVEL ${r.after.level}${n > 1 ? ` (+${n})` : ''} · +${fmt(r.levelCoins)} COINS`;
+        up.classList.add('show');
+        audio.play('levelUp');
+      });
+    }
+    this.$('o-bank').textContent = fmt(r.bank);
+    this.$('o-bankadd').textContent = r.banked > 0 ? `+${fmt(r.banked)}` : '';
+    this.$('o-mlist').innerHTML = missionRows(r.missions);
+    this.$('o-mult').textContent = `SCORE ×${r.multAfter}`;
+    const set = this.$('o-set');
+    set.classList.remove('show');
+    set.classList.toggle('has', r.setComplete);
+    if (r.setComplete) {
+      set.innerHTML = `<b>MISSION SET COMPLETE</b><span>SCORE ×${r.multBefore} → ×${r.multAfter} · +${fmt(r.reward)} COINS</span>`;
+      later(leveled ? 2100 : 900, () => {
+        set.classList.add('show');
+        audio.play('achievement');
+      });
+    }
+  }
+
+  /** Mission multiplier next to the in-run score (set once per run). */
+  setRunMult(mult: number): void {
+    this.$('h-slbl').innerHTML = mult > 1 ? `SCORE <b class="rmult">×${mult}</b>` : 'SCORE';
+  }
+
+  /** Menu: level, XP, coin bank, missions. */
+  setProfile(v: ProfileView): void {
+    const l = v.level;
+    this.$('p-lvl').textContent = String(l.level);
+    this.$('p-rank').textContent = l.rank;
+    this.$('p-xpfill').style.transform = `scaleX(${l.frac.toFixed(3)})`;
+    this.$('p-xp').textContent = `${fmt(l.into)} / ${fmt(l.need)} XP`;
+    this.$('p-bank').textContent = fmt(v.bank);
+    this.$('p-mult').textContent = `SCORE ×${v.mult}`;
+    this.$('p-mlist').innerHTML = missionRows(v.missions);
+    this.$('p-mfoot').textContent = v.mult < 30 ? `Finish all three: score ×${v.mult + 1} for good` : 'Max multiplier reached';
+    this.$('p-legend').style.display = v.newPlayer ? '' : 'none';
+  }
+
+  showPauseMissions(list: MissionView[]): void {
+    this.$('p-pmlist').innerHTML = missionRows(list);
+  }
+
+  private toastQueue: [string, number, number][] = [];
+  private toastTimer = 0;
+
+  /** MISSION COMPLETE card (queued so several at once play one after another). */
+  missionToast(text: string, xp: number, setMult: number): void {
+    this.toastQueue.push([text, xp, setMult]);
+    if (this.toastTimer <= 0) this.nextToast();
+  }
+
+  private nextToast(): void {
+    const t = this.toastQueue.shift();
+    const el = this.$('h-mtoast');
+    if (!t) return;
+    const [text, xp, setMult] = t;
+    this.$('h-mttext').textContent = text;
+    this.$('h-mtsub').textContent = setMult ? `+${xp} XP · ALL 3 DONE · SCORE ×${setMult} NEXT RUN` : `+${xp} XP`;
+    el.classList.toggle('set', setMult > 0);
+    el.classList.remove('go');
+    void el.offsetWidth;
+    el.classList.add('go');
+    this.toastTimer = 2.8;
   }
 
   /** Boot sequence overlay. Resolves when the screen is ready to fade out. */
@@ -523,7 +699,9 @@ export class HUD {
     for (const el of this.cardPool) el.className = 'fix-card';
     this.$('h-banner').classList.remove('show');
     this.$('h-hint').classList.remove('show');
-    this.bannerTimer = this.hintTimer = 0;
+    this.bannerTimer = this.hintTimer = this.toastTimer = 0;
+    this.toastQueue.length = 0;
+    this.$('h-mtoast').classList.remove('go');
     this.boss(false);
   }
 

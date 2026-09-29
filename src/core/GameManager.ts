@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { CONFIG } from './Config';
 import { events } from './EventBus';
 import { GameState, TRANSITIONS } from './GameState';
-import { BestScore, Lifetime } from './BestScore';
+import { Profile, levelInfo, levelReward } from './Profile';
 import { STAGES, THEME, resetTheme, stageAt, updateTheme, type StageDef } from './Theme';
 import { InputManager, type InputAction } from '../input/InputManager';
 import { PlayerController } from '../game/PlayerController';
@@ -11,6 +11,7 @@ import { ComboSystem } from '../game/ComboSystem';
 import { ObstacleWatcher } from '../game/ObstacleWatcher';
 import { PowerUps } from '../game/PowerUps';
 import { VirusBoss } from '../game/VirusBoss';
+import { Missions } from '../game/Missions';
 import { Track } from '../world/Track';
 import { ComputerWorld } from '../world/ComputerWorld';
 import { ThemeLinks } from '../world/ThemeLinks';
@@ -23,7 +24,7 @@ import { loadAvatar } from '../game/ModelAvatar';
 import tyMeshUrl from '../assets/models/ty-mesh.glb?inline';
 import tyAlbedoUrl from '../assets/models/ty-albedo.jpg?inline';
 import { FXDirector } from '../fx/FXDirector';
-import { HUD } from '../ui/HUD';
+import { HUD, type ProgressReport } from '../ui/HUD';
 import { audio } from '../audio/AudioManager';
 import { clamp, makeAABB, overlapX, overlapZ, overlaps } from '../utils/math';
 import { QUALITY, loadQuality, type QualitySettings } from '../render/Quality';
@@ -84,6 +85,9 @@ export class GameManager {
   readonly powers = new PowerUps();
   readonly combo = new ComboSystem();
   readonly watcher = new ObstacleWatcher();
+  /** Saved progress: level, coin bank, best, missions, score multiplier. */
+  readonly profile = new Profile();
+  readonly missions = new Missions(this.profile);
   readonly post: PostFX;
   private readonly watchdog: RenderWatchdog;
   private recoverStep = 0;
@@ -114,6 +118,8 @@ export class GameManager {
   stage: StageDef = STAGES[0];
   /** Counters for tests/analytics. */
   hits = 0;
+  /** Permanent score multiplier from missions, fixed for the whole run. */
+  runMult = 1;
 
   /** When false the RAF loop idles and frames are driven via stepFrame(). */
   autoLoop = true;
@@ -132,7 +138,8 @@ export class GameManager {
   private timeScale = 1;
   private clock = 0;
   private lastFrame = performance.now();
-  private best = BestScore.get();
+  /** A run is in progress that has not been saved to the profile yet. */
+  private runLive = false;
   private readonly debug: boolean;
   private fpsAccum = 0;
   private fpsFrames = 0;
@@ -267,7 +274,8 @@ export class GameManager {
     window.addEventListener('blur', () => this.pause());
 
     this.resetRun();
-    this.hud.setState(this.state, this.best);
+    this.hud.setState(this.state, this.profile.data.best);
+    this.showProfile();
     audio.startMusic();
     audio.onBeat = (kind) => this.fx.onBeat(kind, this.powers.mode, this.state === GameState.Playing, this.multiplier);
     audio.setIntensity(0);
@@ -387,6 +395,14 @@ export class GameManager {
       audio.setBoss(false);
       this.hud.boss(false);
     });
+
+    events.on('missionComplete', ({ text, xp }) => {
+      this.xp += xp;
+      if (this.state !== GameState.Playing) return; // finished as the run ended: the results screen shows it
+      const setDone = this.missions.list.every((m) => m.done);
+      this.hud.missionToast(text, xp, setDone ? Math.min(this.profile.data.mult + 1, 30) : 0);
+      audio.play('achievement');
+    });
   }
 
   // ---------------------------------------------------------- state machine
@@ -400,7 +416,7 @@ export class GameManager {
     const from = this.state;
     this.state = next;
     this.stateTime = 0;
-    this.hud.setState(next, this.best);
+    this.hud.setState(next, this.profile.data.best);
     events.emit('stateChange', { from, to: next });
     audio.setMuffled(next === GameState.Paused);
     audio.setGameOver(next === GameState.Dying || next === GameState.GameOver);
@@ -436,7 +452,10 @@ export class GameManager {
     this.pickups.clear();
     this.track.reset();
     this.player.reset();
-    const tutorial = this.tutorialOverride ?? Lifetime.get().runs < 2;
+    this.runMult = this.profile.data.mult;
+    this.runLive = false;
+    this.hud.setRunMult(this.runMult);
+    const tutorial = this.tutorialOverride ?? this.profile.data.stats.runs < 2;
     this.spawner.reset(this.seed, tutorial);
     this.spawner.update(0, this.speed, 0, 0);
     this.obstacles.update(0, 0, 0);
@@ -450,14 +469,16 @@ export class GameManager {
     if (this.state !== GameState.Ready) return;
     if (this.setState(GameState.Playing)) {
       this.runs++;
-      events.emit('runStart');
+      this.beginRun();
       audio.play('ui');
       this.hud.banner('STAGE 1', this.stage.name, 'cyan', 1.4);
     }
   }
 
   pause(): void {
-    if (this.state === GameState.Playing) this.setState(GameState.Paused);
+    if (this.state !== GameState.Playing) return;
+    this.setState(GameState.Paused);
+    this.hud.showPauseMissions(this.missions.views());
   }
 
   resume(): void {
@@ -475,7 +496,7 @@ export class GameManager {
       this.resetRun();
       if (this.setState(GameState.Playing)) {
         this.runs++;
-        events.emit('runStart');
+        this.beginRun();
         this.hud.banner('SYSTEM RESTORED', `STAGE 1 · ${this.stage.name}`, 'green', 1.4);
       }
     };
@@ -488,8 +509,61 @@ export class GameManager {
   toReady(): void {
     if (this.state !== GameState.Paused && this.state !== GameState.GameOver) return;
     if (this.rebooting) return;
+    // Quitting from pause still keeps what the run earned (coins, XP, missions).
+    const report = this.commitRun();
     this.resetRun();
     this.setState(GameState.Ready);
+    this.showProfile();
+    if (report.setComplete) this.hud.banner('MISSION SET COMPLETE', `SCORE ×${report.multAfter} · +${report.reward} COINS`, 'gold', 2.4);
+    else if (report.after.level > report.before.level) this.hud.banner(`LEVEL ${report.after.level}`, `${report.after.rank} · +${report.levelCoins} COINS`, 'green', 2.2);
+  }
+
+  private beginRun(): void {
+    this.runLive = true;
+    this.missions.beginRun();
+    events.emit('runStart');
+  }
+
+  /** Menu profile strip + missions (only redrawn on state changes, never per frame). */
+  private showProfile(): void {
+    const p = this.profile.data;
+    this.hud.setProfile({ level: this.profile.level, bank: p.bank, mult: p.mult, missions: this.missions.views(), newPlayer: p.stats.runs < 2 });
+  }
+
+  /**
+   * Fold the run into the saved profile: missions first (a finished set pays
+   * out, "play N runs" ticks over), then XP -> levels (each level banks
+   * coins), coins, best score and lifetime stats. Once per run.
+   */
+  private commitRun(): ProgressReport {
+    const p = this.profile.data;
+    const before = levelInfo(p.totalXp);
+    if (!this.runLive) {
+      const m = this.missions.commit();
+      p.bank += m.reward;
+      return { xpGained: 0, before, after: before, levelCoins: 0, banked: 0, bank: p.bank, isNewBest: false, ...m };
+    }
+    this.runLive = false;
+    const m = this.missions.commit(); // may add mission XP to this.xp
+    p.totalXp += this.xp;
+    const after = levelInfo(p.totalXp);
+    let levelCoins = 0;
+    for (let l = before.level + 1; l <= after.level; l++) levelCoins += levelReward(l);
+    const banked = this.coinCount + levelCoins + m.reward;
+    p.bank += banked;
+    const isNewBest = Math.floor(this.score) > p.best;
+    if (isNewBest) p.best = Math.floor(this.score);
+    const st = p.stats;
+    st.runs++;
+    st.bugsFixed += this.bugsFixed;
+    st.coins += this.coinCount;
+    st.distance += Math.floor(this.distance);
+    st.bestDistance = Math.max(st.bestDistance, Math.floor(this.distance));
+    st.bossesDeleted += this.missions.c.boss;
+    st.time += Math.round(this.runTime);
+    this.profile.save();
+    if (isNewBest) events.emit('newBest', { score: p.best });
+    return { xpGained: this.xp, before, after, levelCoins, banked, bank: p.bank, isNewBest, ...m };
   }
 
   private handleInput(a: InputAction): void {
@@ -551,7 +625,7 @@ export class GameManager {
   }
 
   get totalMult(): number {
-    return this.multiplier * this.powers.scoreMult;
+    return this.multiplier * this.powers.scoreMult * this.runMult;
   }
 
   private addScore(points: number): void {
@@ -588,6 +662,9 @@ export class GameManager {
         if (this.state !== GameState.Playing) break;
       }
       if (n === CONFIG.sim.maxSubSteps) this.accumulator = 0;
+      if (this.state === GameState.Playing) {
+        this.missions.track({ distance: this.distance, bugs: this.bugsFixed, coins: this.coinCount, mult: this.multiplier, stage: this.stage.id, score: this.score });
+      }
     }
 
     this.clock += dt;
@@ -693,6 +770,9 @@ export class GameManager {
     this.prevDistance = this.distance;
     this.distance += this.speed * dt;
     this.score += this.speed * dt * this.totalMult * 0.5;
+    // Distance XP: every stretch of track run is worth a little.
+    const every = CONFIG.xp.distanceEvery;
+    this.xp += Math.floor(this.distance / every) - Math.floor(this.prevDistance / every);
 
     const sf = this.speedFactor();
     this.player.step(dt, sf);
@@ -914,13 +994,7 @@ export class GameManager {
   }
 
   private finishRun(): void {
-    const isNewBest = this.score > this.best;
-    if (isNewBest) {
-      this.best = Math.floor(this.score);
-      BestScore.set(this.best);
-      events.emit('newBest', { score: this.best });
-    }
-    Lifetime.add({ runs: 1, xp: this.xp, coins: this.coinCount, bugsFixed: this.bugsFixed });
+    const report = this.commitRun();
     this.hud.showGameOver({
       score: this.score,
       distance: this.distance,
@@ -929,13 +1003,14 @@ export class GameManager {
       bestCombo: this.combo.best,
       bestMultiplier: this.combo.bestMultiplier,
       xp: this.xp,
-      health: this.health,
-      best: this.best,
-      isNewBest,
+      runMult: this.runMult,
+      best: this.profile.data.best,
+      isNewBest: report.isNewBest,
       cause: CAUSE[this.killer],
       stageName: `STAGE ${this.stage.id} ${this.stage.name}`,
-    });
+    }, report);
     this.setState(GameState.GameOver);
+    this.showProfile();
   }
 
   private stats() {

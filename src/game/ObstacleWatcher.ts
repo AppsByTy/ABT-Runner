@@ -55,7 +55,7 @@ export class ObstacleWatcher {
           const x = o.x;
           const y = o.cls === 'high' ? ob.minY : ob.maxY;
           if (o.late || o.minClear < N.verticalClearance) {
-            events.emit('nearMiss', { kind: o.kind, style: 'vertical', x, y, z: 0 });
+            events.emit('nearMiss', { kind: o.kind, style: 'vertical', how: o.cls === 'low' ? 'jump' : 'slide', x, y, z: 0 });
           } else {
             events.emit('obstacleCleared', { kind: o.kind, how: o.cls === 'low' ? 'jump' : 'slide', x, y, z: 0 });
           }

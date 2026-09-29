@@ -1,0 +1,853 @@
+/*
+ * Progression UI (Phase 4): the menu's profile strip and missions card, the
+ * in-run MISSION COMPLETE card and the results screen.
+ *
+ * Rule for everything here (see HUD.setBeat): nothing restyles per frame, and
+ * every animation is opacity/transform only - never box-shadow, filter, size
+ * or background - so the blurred glass panels are never re-rendered by it.
+ */
+
+/* ------------------------------------------------------------ shared */
+
+.lvl-badge {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 1px;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: linear-gradient(145deg, #e4ff7a, #b4ff1e 45%, #2fe38c);
+  color: #041008;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65), inset 0 -2px 0 rgba(0, 0, 0, 0.2), 0 0 16px rgba(180, 255, 30, 0.3);
+  line-height: 1;
+}
+
+.lvl-badge small {
+  font: 700 8.5px/1 var(--ui);
+  letter-spacing: 1.5px;
+}
+
+.lvl-badge b {
+  font: 400 21px/1 var(--display);
+  letter-spacing: 0.5px;
+}
+
+.xpbar {
+  height: 7px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.xpbar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--lime), #3dffb0 60%, var(--cyan));
+  transform-origin: left;
+  transform: scaleX(0);
+  will-change: transform;
+}
+
+/* ------------------------------------------------------------ menu */
+
+.menu {
+  padding-top: calc(var(--safe-top) + 76px);
+}
+
+.prof {
+  position: absolute;
+  top: calc(var(--safe-top) + 12px);
+  left: calc(var(--safe-left) + 12px);
+  right: calc(var(--safe-right) + 68px);
+  max-width: 380px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 12px 5px 5px;
+  border-radius: 16px;
+  background: var(--glass);
+  border: 1px solid var(--glass-edge);
+  box-shadow: var(--glass-hi), var(--glass-shadow);
+  backdrop-filter: blur(14px) saturate(170%);
+  -webkit-backdrop-filter: blur(14px) saturate(170%);
+}
+
+.prof-mid {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.prof-rank {
+  font: 700 11px/1 var(--ui);
+  letter-spacing: 2px;
+  color: #e8f6ff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.prof-xp {
+  font: 500 9.5px/1 var(--mono);
+  color: #9fb8cf;
+}
+
+.prof-bank {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font: 800 17px/1 var(--mono);
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+
+.prof-bank .coin-ico,
+.o-bank .coin-ico {
+  font-size: 15px;
+  box-shadow: 0 0 8px rgba(255, 190, 0, 0.7);
+}
+
+.hud.settings-open .menu .prof {
+  opacity: 0.15;
+  transition: opacity 0.25s;
+}
+
+/* ------------------------------------------------------------ missions */
+
+.missions {
+  width: min(100%, 400px);
+  padding: 10px 12px 10px;
+  border-radius: 16px;
+  text-align: left;
+  background: var(--glass);
+  border: 1px solid var(--glass-edge);
+  box-shadow: var(--glass-hi), var(--glass-shadow);
+  backdrop-filter: blur(14px) saturate(170%);
+  -webkit-backdrop-filter: blur(14px) saturate(170%);
+}
+
+/* Inside a panel: no second blur layer. */
+.panel .missions {
+  width: 100%;
+  background: rgba(0, 0, 0, 0.26);
+  border: 1px solid rgba(170, 200, 255, 0.16);
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.ms-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font: 700 10px/1 var(--ui);
+  letter-spacing: 2.4px;
+  color: #9fb8cf;
+}
+
+.ms-head b {
+  font: 800 11px/1 var(--mono);
+  letter-spacing: 0.5px;
+  color: var(--gold);
+}
+
+.ms-list {
+  display: grid;
+  gap: 8px;
+}
+
+.ms {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+}
+
+.ms-box {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  border: 1.5px solid rgba(170, 225, 255, 0.45);
+  color: #041008;
+}
+
+.ms.done .ms-box {
+  background: var(--lime);
+  border-color: var(--lime);
+  box-shadow: 0 0 10px rgba(180, 255, 30, 0.45);
+}
+
+.ms-body {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.ms-text {
+  font: 700 12px/1.2 var(--ui);
+  letter-spacing: 0.2px;
+  color: #e8f6ff;
+}
+
+.ms.done .ms-text {
+  color: #a9c2d6;
+}
+
+.ms-bar {
+  display: block;
+  height: 3px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+
+.ms-bar b {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--cyan), var(--lime));
+  transform-origin: left;
+}
+
+.ms-val {
+  font: 800 10.5px/1 var(--mono);
+  font-style: normal;
+  color: #cfe6f7;
+  white-space: nowrap;
+}
+
+.ms.done .ms-val {
+  color: var(--lime);
+  letter-spacing: 1px;
+}
+
+.ms-foot {
+  margin-top: 8px;
+  font: 500 10px/1.3 var(--ui);
+  letter-spacing: 0.5px;
+  color: #7f9bb3;
+  text-align: center;
+}
+
+.missions.compact {
+  margin: 4px 0 6px;
+}
+
+/* Finished during the run that just ended: slide in and tick. */
+.ms.fresh {
+  animation: msIn 0.45s calc(0.5s + var(--i) * 0.16s) cubic-bezier(0.2, 0.9, 0.3, 1) both;
+}
+
+.ms.fresh .ms-box {
+  animation: msTick 0.5s calc(0.6s + var(--i) * 0.16s) cubic-bezier(0.2, 1.6, 0.4, 1) both;
+}
+
+@keyframes msIn {
+  from {
+    opacity: 0;
+    transform: translateX(-14px);
+  }
+}
+
+@keyframes msTick {
+  from {
+    transform: scale(0.2) rotate(-25deg);
+  }
+}
+
+/* ------------------------------------------------------------ in-run toast */
+
+.m-toast {
+  position: absolute;
+  left: 50%;
+  top: calc(var(--safe-top) + 150px);
+  z-index: 6;
+  width: min(80vw, 340px);
+  padding: 8px 14px 9px;
+  border-radius: 14px;
+  text-align: center;
+  background: linear-gradient(150deg, rgba(22, 64, 18, 0.94), rgba(3, 18, 10, 0.94));
+  border: 1px solid rgba(180, 255, 30, 0.75);
+  box-shadow: 0 0 22px rgba(180, 255, 30, 0.3), 0 8px 24px rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  visibility: hidden;
+  transform: translate(-50%, -12px);
+  pointer-events: none;
+}
+
+.m-toast.go {
+  visibility: visible;
+  animation: mToast 2.8s cubic-bezier(0.2, 0.9, 0.3, 1) forwards;
+}
+
+@keyframes mToast {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -16px) scale(0.9);
+  }
+  9% {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1.04);
+  }
+  15%,
+  86% {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -10px) scale(0.98);
+  }
+}
+
+.mt-top {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: 400 15px/1 var(--display);
+  letter-spacing: 3px;
+  color: var(--lime);
+}
+
+.mt-top svg {
+  width: 14px;
+  height: 14px;
+}
+
+.mt-text {
+  margin-top: 4px;
+  font: 700 13px/1.2 var(--ui);
+  color: #fff;
+}
+
+.mt-sub {
+  margin-top: 4px;
+  font: 800 10.5px/1.2 var(--mono);
+  letter-spacing: 0.5px;
+  color: #cfe6f7;
+}
+
+.m-toast.set {
+  border-color: rgba(255, 210, 58, 0.9);
+  box-shadow: 0 0 26px rgba(255, 210, 58, 0.4), 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.m-toast.set .mt-sub {
+  color: var(--gold);
+}
+
+@keyframes mToastR {
+  0% {
+    opacity: 0;
+    transform: translateX(24px) scale(0.92);
+  }
+  9% {
+    opacity: 1;
+    transform: translateX(0) scale(1.04);
+  }
+  15%,
+  86% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+}
+
+/* Phones: right-hand side, clear of the bug-fix cards on the left. */
+@media (max-width: 480px) {
+  .m-toast {
+    left: auto;
+    right: calc(var(--safe-right) + 10px);
+    top: calc(var(--safe-top) + 172px);
+    width: min(56vw, 216px);
+    padding: 7px 10px 8px;
+    transform: translateY(-12px);
+  }
+
+  .m-toast.go {
+    animation-name: mToastR;
+  }
+
+  .mt-top {
+    font-size: 13px;
+    letter-spacing: 2px;
+  }
+
+  .mt-text {
+    font-size: 12px;
+  }
+
+  .mt-sub {
+    font-size: 9.5px;
+  }
+}
+
+.lbl .rmult {
+  margin-left: 4px;
+  font: 800 10px var(--mono);
+  letter-spacing: 0;
+  color: var(--gold);
+}
+
+/* ------------------------------------------------------------ results */
+
+.bsod-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.bsod-head .bsod-face {
+  font-size: 40px;
+}
+
+.bsod-head .bsod-title {
+  margin: 0 0 2px;
+}
+
+.panel.failure .bsod-cause {
+  margin-top: 6px;
+}
+
+.o-score {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 10px 0 8px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.26);
+  border: 1px solid rgba(120, 160, 255, 0.24);
+}
+
+.o-score span {
+  font: 700 11px/1 var(--ui);
+  letter-spacing: 2.5px;
+  color: #b8c8ee;
+}
+
+.o-score b {
+  font: 400 30px/1 var(--display);
+  letter-spacing: 1px;
+  color: var(--cyan);
+  text-shadow: 0 0 12px rgba(0, 229, 255, 0.55);
+  font-variant-numeric: tabular-nums;
+}
+
+.o-score em {
+  margin-left: auto;
+  font: 800 9.5px/1.2 var(--mono);
+  font-style: normal;
+  text-align: right;
+  color: var(--gold);
+}
+
+.o-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.o-grid div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(120, 160, 255, 0.18);
+}
+
+.o-grid span {
+  font: 700 8.5px/1 var(--ui);
+  letter-spacing: 1.2px;
+  color: #93a8d8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.o-grid b {
+  font: 800 14px/1.1 var(--mono);
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+.o-prog {
+  position: relative;
+  display: grid;
+  gap: 9px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(120, 160, 255, 0.24);
+}
+
+.o-lvl {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.o-lvl .lvl-badge {
+  width: 40px;
+  height: 40px;
+}
+
+.o-lvl-mid {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.o-rank {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font: 700 11px/1 var(--ui);
+  letter-spacing: 2px;
+  color: #fff;
+}
+
+.o-rank em {
+  font: 800 11px/1 var(--mono);
+  font-style: normal;
+  letter-spacing: 0;
+  color: var(--lime);
+}
+
+/* Floats over the box, so it never pushes the buttons down after the screen opened. */
+.o-levelup {
+  position: absolute;
+  left: 50%;
+  top: -12px;
+  padding: 4px 12px 3px;
+  border-radius: 999px;
+  white-space: nowrap;
+  font: 400 13px/1.1 var(--display);
+  letter-spacing: 2px;
+  color: #041008;
+  background: linear-gradient(90deg, #e4ff7a, #b4ff1e, #3dffb0);
+  box-shadow: 0 0 16px rgba(180, 255, 30, 0.55);
+  opacity: 0;
+  transform: translateX(-50%) scale(0.6);
+  pointer-events: none;
+}
+
+.o-levelup.show {
+  animation: lvlPop 0.55s cubic-bezier(0.2, 1.5, 0.4, 1) forwards;
+}
+
+@keyframes lvlPop {
+  to {
+    opacity: 1;
+    transform: translateX(-50%) scale(1);
+  }
+}
+
+.o-bank {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font: 700 10px/1 var(--ui);
+  letter-spacing: 2px;
+  color: #93a8d8;
+}
+
+.o-bank b {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: 800 15px/1 var(--mono);
+  letter-spacing: 0;
+  color: #fff;
+}
+
+.o-bank em {
+  margin-left: auto;
+  font: 800 12px/1 var(--mono);
+  font-style: normal;
+  color: var(--gold);
+}
+
+.missions.over {
+  margin-top: 10px;
+  padding: 9px 12px;
+}
+
+/* Space is reserved as soon as the screen opens; only the reveal is delayed. */
+.o-set {
+  display: none;
+  gap: 3px;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  text-align: center;
+  background: linear-gradient(90deg, rgba(255, 184, 0, 0.26), rgba(255, 210, 58, 0.12));
+  border: 1px solid rgba(255, 210, 58, 0.6);
+  opacity: 0;
+}
+
+.o-set.has {
+  display: grid;
+}
+
+.o-set.show {
+  animation: setIn 0.5s cubic-bezier(0.2, 1.4, 0.4, 1) forwards;
+}
+
+@keyframes setIn {
+  from {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.o-set b {
+  font: 400 16px/1.1 var(--display);
+  letter-spacing: 3px;
+  color: var(--gold);
+}
+
+.o-set span {
+  font: 800 11px/1.2 var(--mono);
+  color: #fff;
+}
+
+.panel.failure .btn.primary {
+  margin-top: 12px;
+}
+
+/* NEW HIGH SCORE sheen: a moving highlight (transform) instead of animating the background. */
+.new-best {
+  position: relative;
+  overflow: hidden;
+}
+
+.new-best.show {
+  animation: throb 0.45s infinite alternate;
+}
+
+.new-best::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 35%, rgba(255, 255, 255, 0.55) 50%, transparent 65%);
+  transform: translateX(-100%);
+  pointer-events: none;
+}
+
+.new-best.show::after {
+  animation: nbSheen 1.6s linear infinite;
+}
+
+@keyframes nbSheen {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* Low health pulse: a glow layer's opacity, not the glass panel's box-shadow. */
+.health {
+  position: relative;
+}
+
+.health::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  box-shadow: 0 0 16px rgba(255, 42, 74, 0.6);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.health[data-level='crit']:not(.hit) {
+  animation: none;
+}
+
+.health[data-level='crit']::after {
+  animation: critGlow 0.6s infinite alternate;
+}
+
+@keyframes critGlow {
+  to {
+    opacity: 1;
+  }
+}
+
+/*
+ * Short phones (Safari's toolbars leave ~660 px on a 6.1" iPhone): smaller
+ * title, no legend, and the results screen puts its buttons side by side.
+ */
+@media (max-height: 760px) and (max-aspect-ratio: 1/1) {
+  .menu {
+    padding-top: calc(var(--safe-top) + 70px);
+    padding-bottom: calc(var(--safe-bottom) + 2.5vh);
+  }
+
+  .brand-title {
+    font-size: clamp(40px, 12.5vmin, 80px);
+  }
+
+  .tagline {
+    margin-top: 6px;
+  }
+
+  .menu .legend,
+  .ms-foot {
+    display: none;
+  }
+
+  .menu-bottom {
+    gap: 8px;
+  }
+
+  .missions {
+    padding: 9px 11px;
+  }
+
+  .ms-list {
+    gap: 6px;
+  }
+
+  .bsod-head .bsod-face {
+    display: none;
+  }
+
+  .panel.failure {
+    padding: 14px 14px 12px;
+  }
+
+  .bsod-title {
+    font-size: 26px;
+  }
+
+  .o-score {
+    margin: 8px 0 6px;
+    padding: 6px 10px;
+  }
+
+  .o-score b {
+    font-size: 26px;
+  }
+
+  .o-grid div {
+    padding: 5px 7px;
+  }
+
+  .o-prog {
+    gap: 7px;
+    margin-top: 12px;
+    padding: 8px 10px;
+  }
+
+  .missions.over {
+    margin-top: 8px;
+    padding: 8px 10px;
+  }
+
+  .o-set {
+    margin-top: 8px;
+    padding: 6px 8px;
+  }
+
+  .o-btns {
+    display: grid;
+    grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+    gap: 8px;
+    margin-top: 10px;
+  }
+
+  .o-btns .btn,
+  .panel.failure .o-btns .btn.primary {
+    margin-top: 0;
+    min-height: 54px;
+  }
+
+  .o-btns .btn:not(.primary) {
+    font-size: 12px;
+    letter-spacing: 1.5px;
+  }
+}
+
+/* Landscape phones: two columns (stats | progression + buttons). */
+@media (min-aspect-ratio: 1/1) and (max-height: 600px) {
+  .menu {
+    padding-top: calc(var(--safe-top) + 64px);
+    padding-bottom: calc(var(--safe-bottom) + 12px);
+  }
+
+  .menu .brand {
+    grid-column: 1;
+  }
+
+  .menu .menu-bottom {
+    grid-column: 2;
+    grid-row: 1 / -1;
+    padding-bottom: 0;
+    gap: 8px;
+  }
+
+  .menu .legend,
+  .ms-foot {
+    display: none;
+  }
+
+  .ms-list {
+    gap: 6px;
+  }
+
+  .panel.failure {
+    width: min(94vw, 860px);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    column-gap: 18px;
+    align-items: start;
+    padding: 14px 16px;
+  }
+
+  .panel.failure .o-prog {
+    margin-top: 0;
+  }
+
+  .o-btns {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 0.7fr);
+    gap: 8px;
+    margin-top: 10px;
+  }
+
+  .o-btns .btn,
+  .panel.failure .o-btns .btn.primary {
+    min-height: 48px;
+    margin-top: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .new-best.show::after,
+  .health[data-level='crit']::after {
+    animation: none;
+  }
+}
