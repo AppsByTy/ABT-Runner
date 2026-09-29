@@ -15,6 +15,10 @@ import { audio } from '../audio/AudioManager';
  * splits "sound" into its parts: the music's beat driving the HUD styling,
  * the music engine itself, and the sound effects.
  *
+ * Round 3 result: sound with the beat NOT driving the HUD passed (13k audio
+ * nodes), sound effects only passed, music only (708 HUD beat restyles) was
+ * killed after 37 s. Round 4 re-runs E and L on the fixed build.
+ *
  * Progress is saved every second; if iOS kills the page, the next launch
  * records how far that variant got.
  */
@@ -47,7 +51,7 @@ const SPECS: Record<Variant, Spec> = {
   L: { name: 'Music only (no sound effects)', avatar: true, audio: true, input: 'touch', hits: true, off: 'sfx' },
 };
 const DURATION = 150; // seconds of play per test
-const KEY = 'coderunner.stress.v2';
+const KEY = 'coderunner.stress.v4';
 
 interface Rec {
   v: Variant;
@@ -192,7 +196,7 @@ function instrumentAudio(): void {
   }
 }
 
-export function attachStress(game: GameManager, variant: Variant | null, offered: Variant[] = ['J', 'K', 'L']): void {
+export function attachStress(game: GameManager, variant: Variant | null, offered: Variant[] = ['E', 'L']): void {
   const box = document.createElement('div');
   box.setAttribute('data-ui', '');
   box.style.cssText =
@@ -210,7 +214,7 @@ export function attachStress(game: GameManager, variant: Variant | null, offered
   };
 
   const menu = (): void => {
-    box.innerHTML = `<b style="color:#00e5ff">CRASH TEST 3</b> - an autopilot plays like a person (swipes, gets hit, restarts) for about 2½ minutes. Keep the screen on.<pre style="white-space:pre-wrap;margin:8px 0">${table()}</pre>`;
+    box.innerHTML = `<b style="color:#00e5ff">CRASH TEST 4 (fix check)</b> - an autopilot plays like a person (swipes, gets hit, restarts) for about 2½ minutes. Keep the screen on.<pre style="white-space:pre-wrap;margin:8px 0">${table()}</pre>`;
     for (const v of offered) {
       const b = document.createElement('button');
       b.textContent = `Test ${v}: ${SPECS[v].name}`;

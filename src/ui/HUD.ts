@@ -70,15 +70,18 @@ export class HUD {
           <div class="dist"><b id="h-dist">0</b> m</div>
         </div>
         <div class="dash-c">
-          <div class="combo" id="h-combo">
-            <div class="lbl">DEBUG COMBO</div>
-            <div class="combo-row">
-              <span class="mult" id="h-mult">x1</span>
-              <span class="pmult" id="h-pmult"></span>
+          <div class="combo-wrap" id="h-cwrap">
+            <i class="combo-glow" id="h-cglow"></i>
+            <div class="combo" id="h-combo">
+              <div class="lbl">DEBUG COMBO</div>
+              <div class="combo-row">
+                <span class="mult" id="h-mult">x1</span>
+                <span class="pmult" id="h-pmult"></span>
+              </div>
+              <div class="combo-count" id="h-ccount">0 chain</div>
+              <div class="bar tier"><i id="h-tier"></i></div>
+              <div class="bar timer"><i id="h-ctimer"></i></div>
             </div>
-            <div class="combo-count" id="h-ccount">0 chain</div>
-            <div class="bar tier"><i id="h-tier"></i></div>
-            <div class="bar timer"><i id="h-ctimer"></i></div>
           </div>
           <div class="health" id="h-health">
             <div class="health-top"><span class="lbl">SYSTEM HEALTH</span><b id="h-hp">100%</b></div>
@@ -115,7 +118,7 @@ export class HUD {
       <div class="menu" id="p-ready">
         <div class="brand">
           <div class="brand-top">AppsByTy<span>:</span></div>
-          <h1 class="brand-title" data-text="CODE RUNNER">CODE RUNNER</h1>
+          <h1 class="brand-title" id="p-title" data-text="CODE RUNNER">CODE RUNNER</h1>
           <div class="tagline">RUN. CODE. FIX. REPEAT.</div>
         </div>
         <button class="icon-btn menu-gear" data-ui id="b-settings" aria-label="Sound settings"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
@@ -125,7 +128,7 @@ export class HUD {
             <span><i class="dot r"></i>Avoid red errors</span>
             <span><i class="dot y"></i>Grab power-ups</span>
           </div>
-          <div class="tap">TAP TO START</div>
+          <div class="tap" id="p-tap">TAP TO START</div>
           <div class="controls">Swipe / arrows: <b>←→</b> lane · <b>↑</b> jump · <b>↓</b> slide</div>
           <div class="best">HIGH SCORE <b id="p-best">0</b></div>
         </div>
@@ -146,7 +149,7 @@ export class HUD {
           <button class="tgl" data-ui id="s-mmute">MUTE MUSIC</button>
           <button class="tgl" data-ui id="s-smute">MUTE SFX</button>
         </div>
-        <div class="now-playing"><i class="eq"><b></b><b></b><b></b><b></b></i><span>NOW PLAYING</span><em id="s-track">—</em></div>
+        <div class="now-playing"><i class="eq" id="s-eq"><b></b><b></b><b></b><b></b></i><span>NOW PLAYING</span><em id="s-track">—</em></div>
         <div class="set-note">Original procedural hip-hop. Drop your own tracks into <code>assets/music</code>.</div>
         <button class="btn primary" data-ui id="s-back">DONE</button>
       </div>
@@ -272,13 +275,41 @@ export class HUD {
   private closeSettings: () => void = () => {};
 
   private beatShown = -1;
+  private inRun = false;
+  private static readonly EQ: [number, number][] = [
+    [4, 10],
+    [8, 6],
+    [3, 11],
+    [6, 7],
+  ];
 
-  /** Beat envelope (0..1) from the soundtrack, exposed to CSS as --beat. */
+  /**
+   * Beat envelope (0..1) from the soundtrack. It only drives opacity and
+   * transform on a few elements, written directly - never a CSS variable on
+   * the HUD root, a box-shadow, a filter or a size. Rewriting those every
+   * frame restyled the whole HUD and re-rendered the blurred glass panels
+   * continuously, and iOS Safari killed the page for memory within a minute
+   * of play (on-device crash tests: music with the beat on the HUD died,
+   * the same music with the beat off it passed).
+   */
   setBeat(v: number): void {
     const q = Math.round(v * 20) / 20;
     if (q === this.beatShown) return;
     this.beatShown = q;
-    this.root.style.setProperty('--beat', q.toFixed(2));
+    if (this.inRun) {
+      this.$('h-cglow').style.opacity = q.toFixed(2);
+      this.$('h-mult').style.transform = `scale(${(1 + q * 0.05).toFixed(3)})`;
+      return;
+    }
+    this.$('p-tap').style.transform = `scale(${(1 + q * 0.06).toFixed(3)})`;
+    this.$('p-title').style.transform = `scale(${(1 + q * 0.015).toFixed(4)})`;
+    if (this.$('p-settings').classList.contains('show')) {
+      const bars = this.$('s-eq').children;
+      for (let i = 0; i < bars.length; i++) {
+        const [base, amp] = HUD.EQ[i];
+        (bars[i] as HTMLElement).style.transform = `scaleY(${((base + amp * q) / 14).toFixed(3)})`;
+      }
+    }
   }
 
   setMuted(m: boolean): void {
@@ -290,6 +321,8 @@ export class HUD {
   setState(state: GameState, best: number): void {
     if (state === 'playing') this.closeSettings();
     const inRun = state === 'playing' || state === 'dying' || state === 'paused';
+    this.inRun = inRun;
+    this.beatShown = -1;
     this.root.classList.toggle('in-run', inRun);
     this.root.classList.toggle('menu-open', state === 'ready');
     this.$('p-ready').classList.toggle('show', state === 'ready');
@@ -333,6 +366,7 @@ export class HUD {
     this.set('h-tier', Math.round(s.tierProgress * 100), (el, v) => ((el as HTMLElement).style.transform = `scaleX(${Number(v) / 100})`));
     this.$('h-ctimer').style.transform = `scaleX(${s.comboTimer.toFixed(3)})`;
     this.$('h-combo').classList.toggle('live', s.combo > 0);
+    this.$('h-cwrap').classList.toggle('live', s.combo > 0);
 
     // SYSTEM HEALTH
     const hp = Math.max(0, Math.round(s.health));
