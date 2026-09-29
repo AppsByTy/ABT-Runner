@@ -146,11 +146,14 @@ export class HUD {
         </div>
       </div>
 
-      <div class="boss" id="h-boss">
-        <div class="boss-top"><span class="boss-name"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"><path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18v.5"/></svg>THE VIRUS</span><span id="h-bosstime">0s</span></div>
-        <div class="boss-lbl" id="h-bosslbl">PATCHING SYSTEM… 0%</div>
-        <div class="bar boss-bar"><i id="h-bossbar"></i></div>
+      <div class="bossbar" id="h-bossbar">
+        <div class="bb-top"><span class="bb-name" id="h-bbname"></span><span class="bb-phase" id="h-bbphase">PHASE 1</span></div>
+        <div class="bb-bar"><i class="bb-trail" id="h-bbtrail"></i><i class="bb-fill" id="h-bbfill"></i><span class="bb-marks" id="h-bbmarks"></span></div>
       </div>
+      <div class="cine" id="h-cine"><i class="cine-top"></i><i class="cine-bot"></i></div>
+      <div class="bwarn" id="h-bwarn"><div class="bw-stripe"></div><div class="bw-title">⚠ WARNING ⚠</div><div class="bw-sub" id="h-bwsub"></div><div class="bw-stripe"></div></div>
+      <div class="btitle" id="h-btitle2"><div class="bt-tag" id="h-bttag"></div><div class="bt-name" id="h-btname"></div><div class="bt-sub" id="h-btsub"></div></div>
+      <div class="bwin" id="h-bwin"><div class="bwn-title" id="h-bwntitle"></div><div class="bwn-sub" id="h-bwnsub"></div><div class="bwn-name" id="h-bwnname"></div><div class="bwn-rew" id="h-bwnrew"></div></div>
 
       <div class="cards" id="h-cards"></div>
       <div class="popups" id="h-popups"></div>
@@ -434,7 +437,12 @@ export class HUD {
     this.$('h-pause').style.visibility = state === 'playing' ? 'visible' : 'hidden';
     this.$('p-best').textContent = fmt(best);
     if (state !== 'dying') this.$('h-crash').classList.remove('show');
-    if (state === 'gameover' || state === 'ready') this.boss(false);
+    if (state === 'gameover' || state === 'ready') {
+      this.bossBar(null);
+      this.bossWarning(null);
+      this.bossCine(false);
+      this.bossVictory(null);
+    }
     if (state !== 'playing') this.$('h-hint').classList.remove('show');
   }
 
@@ -556,15 +564,59 @@ export class HUD {
     this.hintTimer = 2.4;
   }
 
-  boss(show: boolean, progress = 0, needed = 1, timeLeft = 0): void {
-    const el = this.$('h-boss');
-    el.classList.toggle('show', show);
-    this.root.classList.toggle('boss-on', show);
-    if (!show) return;
-    const pct = Math.round((progress / needed) * 100);
-    this.set('h-bosslbl', pct, (e, v) => (e.textContent = Number(v) >= 100 ? 'VIRUS DELETED ✓' : `PATCHING SYSTEM… ${v}%  (${progress}/${needed} patches)`));
-    this.$('h-bossbar').style.transform = `scaleX(${(progress / needed).toFixed(3)})`;
-    this.set('h-bosstime', Math.ceil(Math.max(0, timeLeft)), (e, v) => (e.textContent = `${v}s`));
+  // ------------------------------------------------------------ boss encounters
+  // Everything here is set once per event; animations are CSS opacity/transform.
+
+  bossWarning(name: string | null): void {
+    const el = this.$('h-bwarn');
+    if (name) this.$('h-bwsub').textContent = `${name} APPROACHING`;
+    el.classList.toggle('show', !!name);
+  }
+
+  bossCine(on: boolean): void {
+    this.$('h-cine').classList.toggle('show', on);
+    this.root.classList.toggle('cine-on', on);
+  }
+
+  bossTitle(name: string, sub: string, tag: string, color: string): void {
+    const el = this.$('h-btitle2');
+    this.$('h-btname').textContent = name;
+    this.$('h-btsub').textContent = sub;
+    this.$('h-bttag').textContent = tag;
+    el.style.setProperty('--bc', color);
+    el.classList.remove('go');
+    void el.offsetWidth;
+    el.classList.add('go');
+  }
+
+  bossBar(cfg: { name: string; color: string; phases: number[] } | null): void {
+    const el = this.$('h-bossbar');
+    el.classList.toggle('show', !!cfg);
+    this.root.classList.toggle('boss-on', !!cfg);
+    if (!cfg) return;
+    el.style.setProperty('--bc', cfg.color);
+    this.$('h-bbname').textContent = cfg.name;
+    this.$('h-bbmarks').innerHTML = cfg.phases.slice(1).map((a) => `<i style="left:${(a * 100).toFixed(1)}%"></i>`).join('');
+    this.bossHp(1, 0);
+  }
+
+  bossHp(frac: number, phase: number): void {
+    const f = `scaleX(${Math.max(0, frac).toFixed(3)})`;
+    this.$('h-bbfill').style.transform = f;
+    this.$('h-bbtrail').style.transform = f;
+    this.$('h-bbphase').textContent = `PHASE ${phase + 1}`;
+  }
+
+  bossVictory(cfg: { title: string; sub: string; name: string; rewards: string; color: string } | null): void {
+    const el = this.$('h-bwin');
+    if (cfg) {
+      this.$('h-bwntitle').textContent = cfg.title;
+      this.$('h-bwnsub').textContent = cfg.sub;
+      this.$('h-bwnname').textContent = `${cfg.name} DELETED`;
+      this.$('h-bwnrew').textContent = cfg.rewards;
+      el.style.setProperty('--bc', cfg.color);
+    }
+    el.classList.toggle('show', !!cfg);
   }
 
   damageFlash(): void {
@@ -739,7 +791,7 @@ export class HUD {
     this.bannerTimer = this.hintTimer = this.toastTimer = 0;
     this.toastQueue.length = 0;
     this.$('h-mtoast').classList.remove('go');
-    this.boss(false);
+    this.bossBar(null);
   }
 
   private bump(el: HTMLElement): void {

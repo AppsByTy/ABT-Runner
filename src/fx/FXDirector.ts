@@ -3,7 +3,6 @@ import { events } from '../core/EventBus';
 import { THEME } from '../core/Theme';
 import type { CameraController } from '../game/CameraController';
 import type { PlayerController } from '../game/PlayerController';
-import type { VirusBoss } from '../game/VirusBoss';
 import { POWER_INFO, type PowerType } from '../world/Pickups';
 import { glyphAtlas } from '../world/ComputerWorld';
 import { canvasTexture } from '../utils/textures';
@@ -67,7 +66,7 @@ export class FXDirector {
   private readonly scene: THREE.Scene;
   private haloTarget = 0;
 
-  constructor(scene: THREE.Scene, player: PlayerController, cam: CameraController, post: PostFX, boss: VirusBoss, density = 1) {
+  constructor(scene: THREE.Scene, player: PlayerController, cam: CameraController, post: PostFX, boss: { readonly fighting: boolean; readonly mouth: THREE.Vector3 }, density = 1) {
     this.scene = scene;
     this.player = player;
     this.particles = new Particles(scene, 1400);
@@ -289,25 +288,38 @@ export class FXDirector {
       post.glitch(1.2);
       post.flashScreen(THEME.uPrimary.value.getStyle(), 0.2);
     });
-    events.on('bossStart', () => {
-      cam.cinematic('boss', 2.2);
-      post.glitch(1.0);
-      post.flashScreen(RED, 0.3);
-      cam.shake(0.5);
+    events.on('bossWarning', () => post.glitch(0.8));
+    events.on('bossImpact', ({ x, y, z, color }) => {
+      // Entrance: a ring of energy and debris where it lands.
+      this.ring(x, 0.05, z, color, 10);
+      this.ring(x, 0.05, z, '#ffffff', 6);
+      p.burst(x, y + 1, z, { count: 90, color: [color, '#ffffff', GOLD], speed: [6, 18], dir: [0, 0.6, 0], life: [0.6, 1.2], size: [0.2, 0.5], gravity: 9, drag: 1, world: false, jitter: 4, shape: [Shape.Shard, Shape.Spark, Shape.Pixel], spin: 8 });
+      this.dark.burst(x, y + 1, z, { count: 30, color: ['#000000', '#1a0005'], speed: [2, 6], life: [0.8, 1.5], size: [1, 2.2], drag: 1.2, world: false, jitter: 5 });
     });
-    events.on('bossPatched', () => {
-      const b = boss.mouth;
-      p.burst(b.x, b.y, b.z, { count: 40, color: [GOLD, '#ffffff', GREEN], speed: [4, 10], life: [0.4, 0.8], size: [0.25, 0.5], drag: 1.5, world: false, jitter: 3, shape: [Shape.Spark, Shape.Shard, Shape.Glyph], spin: 6 });
-      this.dark.burst(b.x, b.y, b.z, { count: 16, color: ['#000000', '#1a0005'], speed: [2, 5], life: [0.6, 1.1], size: [0.8, 1.4], drag: 1.5, world: false, jitter: 2 });
-      this.beam(new THREE.Vector3(player.x, 1, 0), b.x, b.z, GOLD, b.y);
+    events.on('bossHit', ({ x, y, z, kind }) => {
+      p.burst(x, y, z, { count: kind === 'patch' ? 50 : 25, color: [GOLD, '#ffffff', GREEN], speed: [4, 11], life: [0.4, 0.8], size: [0.25, 0.5], drag: 1.5, world: false, jitter: 2, shape: [Shape.Spark, Shape.Shard, Shape.Glyph], spin: 6 });
+      if (kind === 'patch') this.beam(new THREE.Vector3(player.x, 1, 0), x, z, GOLD, y);
+      else this.beam(new THREE.Vector3(player.x, 0.3, 0), x, z, CYAN, y);
+      post.pulse(0.6);
+      cam.shake(0.25);
+    });
+    events.on('bossPhase', ({ x, y, z }) => {
+      p.burst(x, y, z, { count: 120, color: [RED, MAGENTA, '#ffffff'], speed: [6, 16], life: [0.6, 1.2], size: [0.2, 0.45], drag: 1, world: false, jitter: 4, shape: [Shape.Streak, Shape.Spark, Shape.Pixel], spin: 8 });
+      this.ring(x, 0.05, z, RED, 12);
+    });
+    events.on('bossExplode', ({ x, y, z, size, color }) => {
+      p.burst(x, y, z, { count: Math.round(60 * size), color: [color, '#ffffff', GOLD, RED], speed: [4 * size, 16 * size], life: [0.5, 1.2], size: [0.25 * size, 0.6 * size], drag: 1, world: false, jitter: 2 * size, shape: [Shape.Shard, Shape.Spark, Shape.Streak, Shape.Pixel], spin: 10 });
+      this.dark.burst(x, y, z, { count: Math.round(18 * size), color: ['#000000', '#1a0005', '#050505'], speed: [2, 7 * size], life: [0.8, 1.6], size: [0.8 * size, 1.8 * size], drag: 1.2, world: false, jitter: 3 });
+      if (size >= 1) this.ring(x, 0.05, z, color, 14 * size);
+      post.glitch(0.5 * size);
+    });
+    events.on('bossDebris', ({ x, z, color }) => {
+      p.burst(x, 9, z, { count: 14, color: [color, '#ffffff', '#ffb020'], speed: [1, 3], dir: [0, -1, 0], life: [0.9, 1.4], size: [0.12, 0.28], gravity: 14, world: false, shape: [Shape.Shard, Shape.Spark], spin: 10 });
     });
     events.on('bossDeleted', () => {
-      const b = boss.mouth;
-      p.burst(b.x, b.y, b.z, { count: 160, color: [GREEN, '#ffffff', GOLD, RED], speed: [6, 20], life: [0.6, 1.4], size: [0.3, 0.7], drag: 1, world: false, jitter: 4, shape: [Shape.Pixel, Shape.Shard, Shape.Streak, Shape.Glyph, Shape.Spark], spin: 10 });
-      this.dark.burst(b.x, b.y, b.z, { count: 50, color: ['#000000', '#200006', '#050505'], speed: [3, 9], life: [0.8, 1.6], size: [1, 2], drag: 1.2, world: false, jitter: 4 });
-      post.flashScreen('#ffffff', 0.6);
-      post.glitch(1);
-      cam.shake(0.8);
+      post.flashScreen('#ffffff', 0.7);
+      post.glitch(1.2);
+      cam.shake(1);
     });
     events.on('death', () => {
       // Crash: the character shatters into glitch fragments.
