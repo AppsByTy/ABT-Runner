@@ -1,4 +1,5 @@
 import type { GameManager } from '../core/GameManager';
+import { audio } from '../audio/AudioManager';
 
 /**
  * On-device crash test (only in builds made with VITE_STRESS=1).
@@ -9,11 +10,16 @@ import type { GameManager } from '../core/GameManager';
  * input path a finger uses, gets hit, dies and presses REBOOT, with the
  * audio unlocked by a real tap - and each variant removes one ingredient.
  *
+ * Round 2 result on the iPhone: every variant with sound was killed within
+ * 26-60 s; the same autopilot with no sound passed twice. Round 3 (J-L)
+ * splits "sound" into its parts: the music's beat driving the HUD styling,
+ * the music engine itself, and the sound effects.
+ *
  * Progress is saved every second; if iOS kills the page, the next launch
  * records how far that variant got.
  */
 
-export type Variant = 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I';
+export type Variant = 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J' | 'K' | 'L';
 
 interface Spec {
   name: string;
@@ -22,6 +28,8 @@ interface Spec {
   /** none = invincible runner, no input (round 1); touch = synthetic swipes; buttons = direct actions */
   input: 'none' | 'touch' | 'buttons';
   hits: boolean;
+  /** Sound kept on, but one part of it switched off. */
+  off?: 'beatCss' | 'music' | 'sfx';
 }
 
 const SPECS: Record<Variant, Spec> = {
@@ -34,6 +42,9 @@ const SPECS: Record<Variant, Spec> = {
   G: { name: 'Autopilot: no sound', avatar: true, audio: false, input: 'touch', hits: true },
   H: { name: 'Autopilot: no 3D character', avatar: false, audio: true, input: 'touch', hits: true },
   I: { name: 'Autopilot: button input', avatar: true, audio: true, input: 'buttons', hits: true },
+  J: { name: 'Sound on, beat not driving HUD', avatar: true, audio: true, input: 'touch', hits: true, off: 'beatCss' },
+  K: { name: 'Sound effects only (no music)', avatar: true, audio: true, input: 'touch', hits: true, off: 'music' },
+  L: { name: 'Music only (no sound effects)', avatar: true, audio: true, input: 'touch', hits: true, off: 'sfx' },
 };
 const DURATION = 150; // seconds of play per test
 const KEY = 'coderunner.stress.v2';
@@ -47,6 +58,10 @@ interface Rec {
   hits: number;
   swipes: number;
   fps: number;
+  /** Web Audio nodes created / offline renders / HUD beat style writes so far. */
+  nodes?: number;
+  oac?: number;
+  css?: number;
   passed: boolean;
 }
 interface Store {
@@ -153,7 +168,31 @@ function swipe(dir: 'left' | 'right' | 'jump' | 'slide'): void {
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
-export function attachStress(game: GameManager, variant: Variant | null, offered: Variant[] = ['E', 'F', 'G', 'H', 'I']): void {
+/** Counters for the audio / styling work the test does (stress builds only). */
+const tally = { nodes: 0, oac: 0, css: 0 };
+function instrumentAudio(): void {
+  const proto = BaseAudioContext.prototype as unknown as Record<string, unknown>;
+  for (const m of Object.getOwnPropertyNames(BaseAudioContext.prototype)) {
+    if (!/^create/.test(m)) continue; // (reading accessors like currentTime on the prototype would throw)
+    const fn = proto[m];
+    if (typeof fn !== 'function') continue;
+    proto[m] = function (this: BaseAudioContext, ...a: unknown[]) {
+      if (!(this instanceof OfflineAudioContext)) tally.nodes++;
+      return (fn as (...x: unknown[]) => unknown).apply(this, a);
+    };
+  }
+  const OAC = window.OfflineAudioContext;
+  if (OAC) {
+    const Counted = function (...a: ConstructorParameters<typeof OfflineAudioContext>) {
+      tally.oac++;
+      return new OAC(...a);
+    } as unknown as typeof OfflineAudioContext;
+    Counted.prototype = OAC.prototype;
+    Object.assign(window, { OfflineAudioContext: Counted });
+  }
+}
+
+export function attachStress(game: GameManager, variant: Variant | null, offered: Variant[] = ['J', 'K', 'L']): void {
   const box = document.createElement('div');
   box.setAttribute('data-ui', '');
   box.style.cssText =
@@ -163,14 +202,15 @@ export function attachStress(game: GameManager, variant: Variant | null, offered
   const btnCss = 'display:block;width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid #00e5ff;background:#06243a;color:#fff;font:600 14px system-ui';
 
   const line = (x: Rec): string =>
-    `${x.v} ${SPECS[x.v].name}: ${x.passed ? `PASSED ${DURATION} s` : `KILLED after ${Math.round(x.t)} s`} · run ${x.run} at ${Math.round(x.d)} m · ${x.hits} hits · ${x.swipes} swipes · ${x.fps} fps`;
+    `${x.v} ${SPECS[x.v].name}: ${x.passed ? `PASSED ${DURATION} s` : `KILLED after ${Math.round(x.t)} s`} · run ${x.run} at ${Math.round(x.d)} m · ${x.hits} hits · ${x.swipes} swipes · ${x.fps} fps` +
+    (x.nodes !== undefined ? ` · ${x.nodes} nodes · ${x.oac} renders · ${x.css} beat styles` : '');
   const table = (): string => {
     const r = load().results;
     return r.length ? r.map(line).join('\n') : 'No results yet.';
   };
 
   const menu = (): void => {
-    box.innerHTML = `<b style="color:#00e5ff">CRASH TEST 2</b> - an autopilot plays like a person (swipes, gets hit, restarts) for about 2½ minutes. Keep the screen on.<pre style="white-space:pre-wrap;margin:8px 0">${table()}</pre>`;
+    box.innerHTML = `<b style="color:#00e5ff">CRASH TEST 3</b> - an autopilot plays like a person (swipes, gets hit, restarts) for about 2½ minutes. Keep the screen on.<pre style="white-space:pre-wrap;margin:8px 0">${table()}</pre>`;
     for (const v of offered) {
       const b = document.createElement('button');
       b.textContent = `Test ${v}: ${SPECS[v].name}`;
@@ -196,6 +236,18 @@ export function attachStress(game: GameManager, variant: Variant | null, offered
   if (!variant) return menu();
 
   const spec = SPECS[variant];
+  if (spec.audio) instrumentAudio();
+  const hud = game.hud as unknown as { setBeat(v: number): void };
+  const setBeat = hud.setBeat.bind(hud);
+  let lastBeat = -1;
+  hud.setBeat = spec.off === 'beatCss' ? () => {} : (v: number) => {
+    const q = Math.round(v * 20) / 20; // same quantisation as the HUD: counts real style writes
+    if (q !== lastBeat) tally.css++;
+    lastBeat = q;
+    setBeat(v);
+  };
+  if (spec.off === 'music') audio.stopMusic();
+  if (spec.off === 'sfx') (audio as unknown as { play(): void }).play = () => {};
   const status = (msg: string): void => {
     box.innerHTML = `<b style="color:#00e5ff">TEST ${variant}: ${spec.name}</b><br>${msg}`;
   };
@@ -281,7 +333,7 @@ export function attachStress(game: GameManager, variant: Variant | null, offered
       if (!spec.hits) game.player.grace(5);
       best = Math.max(best, game.distance);
       const t = (performance.now() - t0) / 1000;
-      const rec: Rec = { v: variant, t, run, d: game.distance, best, hits: hitsBefore + game.hits, swipes, fps, passed: false };
+      const rec: Rec = { v: variant, t, run, d: game.distance, best, hits: hitsBefore + game.hits, swipes, fps, nodes: tally.nodes, oac: tally.oac, css: tally.css, passed: false };
       const s = load();
       if (t >= DURATION) {
         s.running = null;
