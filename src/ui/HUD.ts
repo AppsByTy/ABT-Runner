@@ -215,7 +215,7 @@ export class HUD {
           <button class="tgl" data-ui id="s-smute">MUTE SFX</button>
         </div>
         <div class="now-playing"><i class="eq" id="s-eq"><b></b><b></b><b></b><b></b></i><span>NOW PLAYING</span><em id="s-track">—</em></div>
-        <div class="set-note">Original procedural hip-hop. Drop your own tracks into <code>assets/music</code>.</div>
+        <div class="set-note" id="s-note">Original procedural hip-hop. Drop your own tracks into assets/music.</div>
         <button class="btn primary" data-ui id="s-back">DONE</button>
       </div>
 
@@ -331,6 +331,11 @@ export class HUD {
       this.$('s-mmute').classList.toggle('on', st.musicMuted);
       this.$('s-smute').classList.toggle('on', st.sfxMuted);
       this.$('s-track').textContent = audio.nowPlaying || '—';
+      this.$('s-note').textContent = audio.usingMix
+        ? `Soundtrack: ${audio.mixTitle} (${audio.mixParts} parts, about an hour). It picks up where you left off.`
+        : audio.mixError
+          ? `Your mix couldn't play here (${audio.mixError}), so the built-in soundtrack is on.`
+          : 'Original procedural hip-hop. Drop your own tracks into assets/music.';
     };
     const open = (): void => {
       sync();
