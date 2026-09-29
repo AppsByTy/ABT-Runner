@@ -8,6 +8,9 @@ interface At {
   z: number;
 }
 
+/** How a boss got hurt: touch attacks (strike/crit/counter/special) or legacy patch/dodge. */
+export type BossHitKind = 'patch' | 'dodge' | 'strike' | 'crit' | 'counter' | 'special';
+
 /**
  * Every gameplay event other systems may care about. FX, audio and the HUD
  * subscribe here instead of being wired directly into gameplay code.
@@ -50,7 +53,9 @@ export interface GameEvents {
   bossStart: { name: string; index: number };
   bossImpact: At & { color: string };
   bossActive: undefined;
-  bossHit: At & { dmg: number; hp: number; max: number; kind: 'patch' | 'dodge' };
+  bossHit: At & { dmg: number; hp: number; max: number; kind: BossHitKind; combo?: number; perfect?: boolean };
+  /** A touch attack sequence resolved (ok) or failed. */
+  bossSeq: { ok: boolean; kind: string; perfect: boolean; combo: number };
   bossPhase: At & { phase: number; label: string };
   bossDeleted: At & { name: string; index: number };
   bossExplode: At & { size: number; color: string };

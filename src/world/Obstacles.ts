@@ -81,6 +81,8 @@ export interface Obstacle {
   inLane: boolean;
   minClear: number;
   noScore: boolean;
+  /** Boss decoy: a hologram that can't hurt (it flickers, and gets no floor warning). */
+  fake: boolean;
   late: boolean;
   /** Per-instance shader uniforms, if any. */
   uniforms?: Record<string, THREE.IUniform>;
@@ -349,6 +351,8 @@ export interface SpawnOpts {
   materialize?: boolean;
   /** Boss attacks (laser / shockwave): energy colour. */
   color?: THREE.ColorRepresentation;
+  /** Harmless decoy (Code Breaker). */
+  fake?: boolean;
 }
 
 export class ObstacleManager {
@@ -373,7 +377,7 @@ export class ObstacleManager {
     const fresh = (kind: ObstacleKind, mesh: THREE.Group, body: THREE.Group, depth: number): Obstacle => ({
       kind, cls: KIND_CLASS[kind], mesh, body, lane: 1, x: 0, dist: 0, depth, ...DIMS[KIND_CLASS[kind]],
       variant: 0, charge: 0, toLane: -1, fromX: 0, switchT: 0, phase: 0, appear: 1, destroyed: false,
-      arrived: false, passed: false, inLane: false, minClear: Infinity, noScore: false, late: false,
+      arrived: false, passed: false, inLane: false, minClear: Infinity, noScore: false, fake: false, late: false,
     });
     const group = (): [THREE.Group, THREE.Group] => {
       const g = new THREE.Group();
@@ -826,6 +830,8 @@ export class ObstacleManager {
     o.dist = dist;
     o.arrived = o.passed = o.inLane = o.noScore = o.late = o.destroyed = false;
     o.minClear = Infinity;
+    o.fake = !!opts.fake;
+    if (o.fake) o.noScore = true;
     o.variant = opts.variant ?? 0;
     o.toLane = opts.toLane ?? -1;
     o.switchT = 0;
@@ -879,6 +885,7 @@ export class ObstacleManager {
         }
         const ahead = -zFront;
         if (!o.destroyed) this.behave(o, ahead, dt, time);
+        if (o.fake && !o.destroyed) o.body.visible = Math.sin(time * 38 + o.phase * 7) > -0.55;
         zFront = -(o.dist - distance);
         if (o.appear < 1) {
           o.appear = Math.min(1, o.appear + dt * 3.2);

@@ -9,11 +9,12 @@ import { THEME } from '../core/Theme';
  *   red, hazard stripes  - get out of this lane
  *   gold, chevrons       - jump
  *   cyan, bars           - slide
+ *   green, glow          - safe zone (area attacks)
  */
-export type WarnKind = 'move' | 'jump' | 'slide';
+export type WarnKind = 'move' | 'jump' | 'slide' | 'safe';
 
-const COLORS: Record<WarnKind, string> = { move: '#ff2a4a', jump: '#ffd23a', slide: '#00e5ff' };
-const KIND_ID: Record<WarnKind, number> = { move: 0, jump: 1, slide: 2 };
+const COLORS: Record<WarnKind, string> = { move: '#ff2a4a', jump: '#ffd23a', slide: '#00e5ff', safe: '#3dff7a' };
+const KIND_ID: Record<WarnKind, number> = { move: 0, jump: 1, slide: 2, safe: 3 };
 const LENGTH = 9;
 
 interface Warn {
@@ -29,7 +30,7 @@ export class LaneWarnings {
 
   constructor(scene: THREE.Scene) {
     const geo = new THREE.PlaneGeometry(CONFIG.lanes.width * 0.92, LENGTH).rotateX(-Math.PI / 2);
-    for (let i = 0; i < 14; i++) {
+    for (let i = 0; i < 20; i++) {
       const u = { uColor: { value: new THREE.Color() }, uKind: { value: 0 }, uAlpha: { value: 0 }, uTime: THEME.uTime };
       const mesh = new THREE.Mesh(
         geo,
@@ -53,6 +54,9 @@ export class LaneWarnings {
                 // Chevrons pointing at the hazard (jump).
                 float y = fract(p.y * 5.0 + abs(p.x - 0.5) * 1.6 - uTime * 2.2);
                 pat = smoothstep(0.0, 0.1, y) * smoothstep(0.35, 0.25, y);
+              } else if (uKind > 2.5) {
+                // Safe zone: a calm fill with a bright frame.
+                pat = 0.35 + 0.25 * smoothstep(0.35, 0.0, abs(p.x - 0.5) - 0.2);
               } else {
                 // Low bars (slide under).
                 float y = fract(p.y * 7.0 - uTime * 2.2);

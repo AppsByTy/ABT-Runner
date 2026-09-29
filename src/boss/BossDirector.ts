@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { audio } from '../audio/AudioManager';
 import { LANE_X } from '../core/Config';
 import { events } from '../core/EventBus';
+import type { BossHitKind } from '../core/EventBus';
+import type { InputAction } from '../input/InputManager';
 import type { CameraController } from '../game/CameraController';
 import type { PlayerController } from '../game/PlayerController';
 import type { PostFX } from '../fx/PostFX';
@@ -13,6 +15,7 @@ import type { PickupManager } from '../world/Pickups';
 import type { Spawner } from '../world/Spawner';
 import type { BossModel, BossMode } from './BossModel';
 import { BOSSES, BOSS_AT, BOSS_REPEAT, type AttackDef, type BossDef, type Row } from './bosses';
+import { comboMult, GLYPH_OF, Sequence, SEQ_GRACE, SEQ_LABEL, SEQ_MULT, type SeqKind } from './Combat';
 import { LaneWarnings, type WarnKind } from './LaneWarnings';
 
 /**
@@ -21,6 +24,15 @@ import { LaneWarnings, type WarnKind } from './LaneWarnings';
  *
  *   RUNNING -> WARNING -> BOSS_INTRO -> BOSS_FIGHT -> BOSS_DEFEATED
  *           -> VICTORY_CINEMATIC -> NEXT_LEVEL -> RUNNING
+ *
+ * The fight itself: the boss telegraphs and throws attacks (dodge them with
+ * the normal lane / jump / slide moves), then opens up. While it is open a
+ * touch sequence appears (taps and swipes); entering it strikes the boss.
+ *   hit by the attack       -> OPENING    (normal strike)
+ *   dodged it cleanly       -> WEAK POINT (critical hit)
+ *   dodged a HEAVY attack   -> PERFECT DODGE, slow motion, COUNTER!
+ *   combo builds the SPECIAL meter -> long sequence -> cinematic special
+ *   miss / too slow         -> combo reset, the boss strikes straight back
  *
  * Bosses trigger on "progress distance" - metres run outside encounters -
  * so the corruption stages (areas) are gated by bosses: the next area opens
@@ -55,6 +67,8 @@ export interface BossHost {
 }
 
 interface LiveRow extends Row {
+  /** Direction cue shown as this group of hazards appears. */
+  cue?: { text: string; tone: WarnKind };
   teleAt: number;
   spawnAt: number;
   arriveAt: number;
@@ -69,14 +83,18 @@ interface LiveAttack {
   rows: LiveRow[];
   t: number;
   firstSpawn: number;
+  /** Every hazard is past the runner: judge the dodge. */
+  clearAt: number;
   end: number;
   hitsAtStart: number;
   judged: boolean;
 }
 
 const WARN_FOR = { low: 'jump', high: 'slide', wall: 'move' } as const;
-const DODGE_DMG = 5;
 const PATCH_DMG = 12;
+/** Base strike damage as a share of the boss's health. */
+const STRIKE = 0.036;
+type CineKind = 'counter' | 'special' | 'rage' | 'low' | '';
 
 export class BossDirector {
   state: EncounterState = 'running';
@@ -97,6 +115,15 @@ export class BossDirector {
   defeated = 0;
   /** Metres run inside encounters (excluded from progress distance). */
   encounterDist = 0;
+  /** Touch attack sequence in progress (the boss is open). */
+  seq: Sequence | null = null;
+  combo = 0;
+  /** Special meter, 0..1 (full = SPECIAL ATTACK READY). */
+  meter = 0;
+  /** Left/right swapped (mirror attacks). */
+  reversed = false;
+  /** Per-fight numbers (tests and tuning). */
+  readonly stats = { attacks: 0, dodges: 0, ok: 0, fail: 0, slow: 0, perfect: 0, crit: 0, counter: 0, special: 0, hitsTaken: 0 };
 
   private readonly host: BossHost;
   private readonly models: BossModel[];
@@ -124,6 +151,17 @@ export class BossDirector {
   private readonly shot = { w: 0, pos: new THREE.Vector3(), look: new THREE.Vector3(), fov: 55 };
   private readonly coreW = new THREE.Vector3();
   private readonly nextExplode = { t: 0 };
+  private slowT = 0;
+  private slowScale = 1;
+  private cineT = 0;
+  private cineLen = 1;
+  private cineKind: CineKind = '';
+  private afterCine: (() => void) | null = null;
+  private cineHit: { dmg: number; perfect: boolean; done: boolean } | null = null;
+  private seqHideT = 0;
+  private nextPart: { kind: SeqKind; part: number; phase: number } | null = null;
+  private lowDone = false;
+  private taught = false;
 
   constructor(scene: THREE.Scene, lib: MaterialLib, host: BossHost) {
     this.host = host;
@@ -185,6 +223,8 @@ export class BossDirector {
     this.attack = null;
     this.called.clear();
     this.warnings.clear();
+    this.clearCombat();
+    this.taught = false;
     this.shot.w = 0;
     this.host.cam.shot.w = 0;
     for (const m of this.models) m.reset();
@@ -232,6 +272,11 @@ export class BossDirector {
         this.shift = 0;
         this.lastAttack = '';
         this.called.clear();
+        this.clearCombat();
+        this.combo = 0;
+        this.meter = 0;
+        this.lowDone = false;
+        for (const k of Object.keys(this.stats) as (keyof typeof this.stats)[]) this.stats[k] = 0;
         audio.setBoss(true);
         audio.play('bossRiser');
         events.emit('bossStart', { name: this.name, index: this.index });
@@ -241,7 +286,8 @@ export class BossDirector {
         h.hud.bossCine(false);
         h.hud.bossBar({ name: this.name, color: d.color, phases: d.phases.map((p) => p.at) });
         h.hud.bossHp(1, 0);
-        h.hud.banner('FIGHT!', 'COLLECT GOLD PATCHES TO DAMAGE IT', 'gold', 1.6);
+        h.hud.banner('FIGHT!', 'DODGE ITS ATTACKS · THEN STRIKE BACK', 'gold', 1.6);
+        this.meta();
         this.cooldown = 0.6;
         this.attack = null;
         events.emit('bossActive');
@@ -249,6 +295,7 @@ export class BossDirector {
       case 'defeated': {
         this.attack = null;
         this.warnings.clear();
+        this.clearCombat();
         // Every hazard on the track shatters with it.
         h.obstacles.forEach((o) => {
           if (o.destroyed) return;
@@ -356,8 +403,21 @@ export class BossDirector {
       case 'fight': {
         mode = 'fight';
         this.mood.amount = 0.5 + this.phase * 0.12;
-        // Hit-stop at a phase change.
-        scaleTarget = this.hitStop > 0 ? 0.08 : 1;
+        this.slowT = Math.max(0, this.slowT - dt);
+        const a = this.attack;
+        // Hit-stop at a phase change, slow motion for PERFECTs, counters,
+        // specials and heavy wind-ups.
+        scaleTarget = this.hitStop > 0 ? 0.08 : this.slowT > 0 ? this.slowScale : 1;
+        if (a?.def.heavy && a.t < 0.55 && scaleTarget === 1) scaleTarget = 0.45;
+        if (this.seq && (this.seq.kind === 'counter' || this.seq.kind === 'special') && scaleTarget === 1) scaleTarget = 0.4;
+        if (playing) this.combat(dt);
+        if (this.cineT > 0) {
+          const u = 1 - this.cineT / this.cineLen;
+          shotW = Math.min(1, u * 6, this.cineT / 0.2);
+          this.cineShot(u);
+          scaleTarget = Math.min(scaleTarget, this.cineKind === 'special' ? 0.22 : this.cineKind === 'counter' ? 0.2 : 0.3);
+        }
+        this.inputLocked = this.shielded = this.cineT > 0;
         // Falling debris as the world gets more dangerous.
         if (this.phase >= 1) {
           this.debrisT -= dt;
@@ -420,28 +480,20 @@ export class BossDirector {
   // ------------------------------------------------------------------ fight
 
   private fight(dt: number): void {
-    const d = this.def;
     this.shift = Math.max(0, this.shift - dt);
+    // The boss holds while it is open to a strike or a cinematic plays.
+    if (this.seq || this.cineT > 0 || this.nextPart || this.seqHideT > 0) return;
     const a = this.attack;
     if (a) {
       a.t += dt;
       for (const r of a.rows) {
-        if (!r.shown && a.t >= r.teleAt) this.telegraph(r);
+        if (!r.shown && a.t >= r.teleAt) this.telegraph(r, a);
         if (!r.spawned && a.t >= r.spawnAt) this.spawnRow(r);
       }
-      // Perfect dodge: got through the whole attack without a hit.
-      const lastArrive = a.rows.reduce((m, r) => Math.max(m, r.arriveAt), 0);
-      if (!a.judged && a.t > lastArrive + 0.35) {
+      if (!a.judged && a.t > a.clearAt) {
         a.judged = true;
-        if (this.host.hits() === a.hitsAtStart) {
-          this.host.hud.popup(`PERFECT DODGE · -${DODGE_DMG} HP`, 'cyan', true);
-          this.damage(DODGE_DMG, 'dodge');
-        }
-        this.patchWindow(a);
-      }
-      if (a.t >= a.end) {
         this.attack = null;
-        this.cooldown = Math.max(0.7, d.gap - this.phase * 0.35 - Math.min(0.5, this.cycle * 0.15));
+        this.judge(a);
       }
       return;
     }
@@ -458,94 +510,310 @@ export class BossDirector {
     return Math.max(0.4, 0.75 - this.phase * 0.1);
   }
 
+  /** Rest before the next attack: shorter each phase and in the last quarter. */
+  private get gap(): number {
+    const low = this.hp / this.maxHp <= 0.25 ? 0.75 : 1;
+    return Math.max(0.6, (this.def.gap - this.phase * 0.35 - Math.min(0.5, this.cycle * 0.15)) * low);
+  }
+
   private startAttack(): void {
     const d = this.def;
+    const h = this.host;
     const pool = d.phases[this.phase].attacks;
     let id = this.rng.pick(pool);
     if (id === this.lastAttack && pool.length > 1) id = this.rng.pick(pool.filter((x) => x !== id));
     this.lastAttack = id;
     const def = d.attacks[id];
-    const rows = def.rows({ rng: this.rng, phase: this.phase, lane: this.host.player.lane, color: d.color });
+    const rows = def.rows({ rng: this.rng, phase: this.phase, lane: h.player.lane, color: d.color });
     const lead = this.lead;
     const tele = this.tele;
     const first = 0.35 + tele + lead;
     const live: LiveRow[] = rows.map((r) => ({ ...r, arriveAt: first + r.at, spawnAt: first + r.at - lead, teleAt: first + r.at - lead - tele, dist: 0, shown: false, spawned: false }));
+    this.planCues(live, !!def.area);
+    const speed = Math.max(8, h.speed());
+    const clearAt = live.reduce((m, r) => (r.fake ? m : Math.max(m, r.arriveAt + (r.depth ?? 1.5) / speed)), 0) + 0.3;
     const lastArrive = live.reduce((m, r) => Math.max(m, r.arriveAt), 0);
-    this.attack = { id, def, rows: live, t: 0, firstSpawn: first - lead, end: lastArrive + 0.9, hitsAtStart: this.host.hits(), judged: false };
+    this.attack = { id, def, rows: live, t: 0, firstSpawn: first - lead, clearAt, end: lastArrive + 0.9, hitsAtStart: h.hits(), judged: false };
     if (!this.called.has(id)) {
       this.called.add(id);
-      this.host.hud.hint(def.call);
+      h.hud.hint(def.call);
     }
+    if (def.heavy) {
+      // Heavy: red flash, shake, a warning call-out and a slow-motion wind-up.
+      h.hud.combatFeedback('⚠ HEAVY ATTACK', def.call.split(' · ')[1] ?? def.call, 'red');
+      h.post.flashScreen(d.color, 0.3);
+      h.cam.shake(0.45);
+      audio.play('bossRoar');
+      this.roarT = 1;
+    }
+    if (def.reverse) this.setReversed(true);
     if (def.fx === 'teleport') {
       this.targetX = this.bossX = LANE_X[this.rng.int(0, 2)] * 0.9;
-      this.host.post.glitch(1);
+      h.post.glitch(1);
       audio.play('error');
     } else if (def.fx === 'bluescreen') {
       this.blueT = lastArrive + 0.5;
-      this.host.post.flashScreen('#2a6bff', 0.5);
-    } else if (def.fx === 'glitch') this.host.post.glitch(1.4);
+      h.post.flashScreen('#2a6bff', 0.5);
+    } else if (def.fx === 'glitch') h.post.glitch(1.4);
     audio.play('bossTelegraph');
   }
 
-  private telegraph(r: LiveRow): void {
+  /** Work out a safe route through the attack and the cue for each step. */
+  private planCues(rows: LiveRow[], area: boolean): void {
+    let lane = this.host.player.lane;
+    const real = rows.filter((r) => !r.fake);
+    const ats = [...new Set(real.map((r) => r.at))].sort((x, y) => x - y);
+    for (const at of ats) {
+      const g = real.filter((r) => r.at === at);
+      const of = (c: string): Set<number> => new Set(g.filter((r) => KIND_CLASS[r.kind] === c).flatMap((r) => r.lanes));
+      const walls = of('wall');
+      const lows = of('low');
+      const highs = of('high');
+      const clear = (l: number): boolean => !lows.has(l) && !highs.has(l);
+      const free = [0, 1, 2].filter((l) => !walls.has(l));
+      if (!free.length) continue;
+      const near = free.filter((l) => Math.abs(l - lane) <= 1 && clear(l));
+      const pickFrom = near.length ? near : free;
+      const target = pickFrom.reduce((b, l) => (Math.abs(l - lane) < Math.abs(b - lane) ? l : b));
+      const n = Math.abs(target - lane);
+      const arrow = target < lane ? '◀'.repeat(n) : '▶'.repeat(n);
+      const act = lows.has(target) ? 'JUMP' : highs.has(target) ? 'SLIDE' : '';
+      let text: string;
+      if (n && act) text = target < lane ? `${arrow} MOVE + ${act}` : `MOVE + ${act} ${arrow}`;
+      else if (n) text = target < lane ? `${arrow} DODGE LEFT` : `DODGE RIGHT ${arrow}`;
+      else text = act === 'JUMP' ? '▲ JUMP' : act === 'SLIDE' ? '▼ SLIDE' : area ? '● HOLD THE SAFE ZONE' : '● STAY';
+      g[0].cue = { text, tone: act === 'JUMP' ? 'jump' : act === 'SLIDE' ? 'slide' : area ? 'safe' : 'move' };
+      lane = target;
+    }
+  }
+
+  private telegraph(r: LiveRow, a: LiveAttack): void {
     const h = this.host;
     r.shown = true;
     r.dist = h.distance() + h.speed() * (r.spawnAt - r.teleAt + this.lead);
-    const warn: WarnKind = WARN_FOR[KIND_CLASS[r.kind]];
+    // Decoys get no floor warning: that is how you tell them apart.
+    if (r.fake) return;
+    const cls = KIND_CLASS[r.kind];
+    const warn: WarnKind = WARN_FOR[cls];
     for (const l of r.lanes) this.warnings.show(l, r.dist, warn);
+    if (a.def.area && cls === 'wall') for (let l = 0; l < 3; l++) if (!r.lanes.includes(l)) this.warnings.show(l, r.dist, 'safe');
   }
 
   private spawnRow(r: LiveRow): void {
     const h = this.host;
     r.spawned = true;
-    if (!r.shown) this.telegraph(r);
-    for (const l of r.lanes) h.obstacles.spawn(r.kind, l, r.dist, { materialize: true, depth: r.depth, variant: this.rng.int(0, 3), color: this.def.color });
+    if (!r.shown) {
+      r.shown = true;
+      r.dist = h.distance() + h.speed() * this.lead;
+    }
+    if (r.cue) h.hud.combatCue(this.reversed ? `${r.cue.text} ⇄` : r.cue.text, r.cue.tone);
+    for (const l of r.lanes) h.obstacles.spawn(r.kind, l, r.dist, { materialize: true, depth: r.depth, variant: this.rng.int(0, 3), color: this.def.color, fake: r.fake });
   }
 
-  /** Gold patches (the way to hurt the boss) in lanes the last hazards left open. */
-  private patchWindow(a: LiveAttack): void {
-    const h = this.host;
-    const last = a.rows[a.rows.length - 1];
-    const open = [0, 1, 2].filter((l) => !last.lanes.includes(l) || KIND_CLASS[last.kind] !== 'wall');
-    const n = this.phase === 0 ? 2 : this.rng.chance(0.55) ? 2 : 1;
-    const base = h.distance() + h.speed() * 1.35;
-    let lane = open.includes(h.player.lane) ? h.player.lane : this.rng.pick(open);
-    for (let i = 0; i < n; i++) {
-      const at = base + i * h.speed() * 0.55;
-      h.pickups.spawn('bossPatch', lane, at, 1.0);
-      for (let c = 1; c <= 3; c++) h.pickups.spawn('coin', lane, at - c * 2.3);
-      const next = [lane - 1, lane + 1].filter((l) => l >= 0 && l <= 2);
-      lane = this.rng.chance(0.5) ? lane : this.rng.pick(next);
+  private setReversed(on: boolean): void {
+    if (this.reversed === on) return;
+    this.reversed = on;
+    this.host.hud.combatReverse(on);
+    if (on) {
+      this.host.post.glitch(1.2);
+      audio.play('error');
     }
   }
 
-  /** A security patch reached the boss. */
+  /** The attack is over: how did the runner do? That decides the opening. */
+  private judge(a: LiveAttack): void {
+    const h = this.host;
+    this.setReversed(false);
+    this.stats.attacks++;
+    const clean = h.hits() === a.hitsAtStart;
+    const special = this.meter >= 1;
+    if (clean) this.stats.dodges++;
+    else {
+      this.stats.hitsTaken++;
+      if (this.combo) {
+        this.combo = 0;
+        this.meta();
+      }
+    }
+    if (clean && a.def.heavy) {
+      // PERFECT DODGE -> time slows -> COUNTER!
+      h.hud.combatFeedback('PERFECT DODGE', 'COUNTER!', 'cyan');
+      audio.play('nearMiss');
+      h.post.flashScreen('#00e5ff', 0.3);
+      this.startCine('counter', 0.75, () => this.openSeq(special ? 'special' : 'counter'));
+    } else this.openSeq(special ? 'special' : clean ? 'weak' : 'opening');
+  }
+
+  private openSeq(kind: SeqKind, part = 1): void {
+    if (this.state !== 'fight' || this.hp <= 0) return;
+    const c = this.def.combat;
+    const parts = kind === 'special' ? 1 : c.weak?.[this.phase] ?? 1;
+    const pool = c.seqs[Math.min(this.phase, c.seqs.length - 1)];
+    const steps = kind === 'special' ? c.special : this.rng.pick(pool);
+    const perStep = Math.max(0.36, c.perStep - this.phase * 0.06 - this.cycle * 0.03) * (kind === 'special' ? 1.1 : 1);
+    this.seq = new Sequence(steps, kind, perStep, part, parts);
+    const title = parts > 1 ? `${kind === 'opening' ? 'OPENING' : 'WEAK POINT'} ${part}/${parts}` : SEQ_LABEL[kind];
+    this.host.hud.combatSeq({ title, steps: this.seq.steps, kind });
+    this.host.hud.combatCue(null);
+    if (part === 1) {
+      audio.play('bossTelegraph');
+      this.host.cam.kickFov(-3);
+    }
+    if (!this.taught) {
+      this.taught = true;
+      this.host.hud.hint('TAP / SWIPE THE SEQUENCE TO ATTACK');
+    }
+  }
+
+  /** Taps and swipes go to the sequence while one is open. */
+  combatInput(a: InputAction): boolean {
+    if (this.state !== 'fight' || !this.seq || a === 'pause') return false;
+    const g = GLYPH_OF[a];
+    if (!g) return true;
+    const s = this.seq;
+    const r = s.input(g);
+    if (r === 'ignored') return true;
+    if (r === 'fail') {
+      this.host.hud.combatStep(s.i, 'fail');
+      this.resolveSeq(false);
+      return true;
+    }
+    this.host.hud.combatStep(s.i, r);
+    audio.play('seqTick', s.i * 2);
+    if (r === 'done') this.resolveSeq(true);
+    return true;
+  }
+
+  private resolveSeq(ok: boolean): void {
+    const s = this.seq!;
+    const h = this.host;
+    this.seq = null;
+    this.seqHideT = 0.45;
+    events.emit('bossSeq', { ok, kind: s.kind, perfect: ok && s.perfect, combo: ok ? this.combo + 1 : 0 });
+    if (!ok) {
+      this.stats.fail++;
+      if (s.failReason === 'slow') this.stats.slow++;
+      this.combo = 0;
+      if (s.kind === 'special') this.meter = 0.5;
+      h.hud.combatFeedback('MISS', s.failReason === 'slow' ? 'TOO SLOW · IT STRIKES BACK' : 'WRONG MOVE · IT STRIKES BACK', 'red');
+      audio.play('seqMiss');
+      h.post.flashScreen('#ff2a4a', 0.25);
+      h.cam.shake(0.35);
+      this.roarT = 1;
+      // The boss punishes the miss: next attack straight away.
+      this.cooldown = 0.3;
+      this.meta();
+      return;
+    }
+    this.stats.ok++;
+    const perfect = s.perfect;
+    if (perfect) this.stats.perfect++;
+    this.combo++;
+    const kind: BossHitKind = s.kind === 'opening' ? 'strike' : s.kind === 'weak' ? 'crit' : s.kind;
+    if (kind === 'crit') this.stats.crit++;
+    if (kind === 'counter') this.stats.counter++;
+    const dmg = Math.max(1, Math.round(this.maxHp * STRIKE * SEQ_MULT[s.kind] * comboMult(this.combo) * (perfect ? 1.35 : 1)));
+    const before = this.meter;
+    this.meter = s.kind === 'special' ? 0 : Math.min(1, this.meter + 0.2 + (perfect ? 0.1 : 0) + (s.kind === 'counter' ? 0.15 : 0));
+    const ready = before < 1 && this.meter >= 1;
+    if (s.kind === 'special') {
+      this.stats.special++;
+      this.cineHit = { dmg, perfect, done: false };
+      h.hud.combatFeedback('SPECIAL ATTACK', 'SYSTEM OVERRIDE', 'lime');
+      audio.play('perfect');
+      this.startCine('special', 1.8);
+    } else this.strike(dmg, kind, perfect);
+    this.meta();
+    if (ready) {
+      h.hud.hint('SPECIAL ATTACK READY · NEXT OPENING UNLEASHES IT');
+      audio.play('comboTier');
+    }
+    if (this.state !== 'fight') return;
+    if (s.part < s.parts && s.kind !== 'special') this.nextPart = { kind: s.kind, part: s.part + 1, phase: this.phase };
+    else this.cooldown = this.gap;
+  }
+
+  /** The runner's attack lands. */
+  private strike(dmg: number, kind: BossHitKind, perfect: boolean): void {
+    const h = this.host;
+    const title = perfect ? 'PERFECT!' : kind === 'crit' ? 'CRITICAL HIT!' : kind === 'counter' ? 'COUNTER!' : kind === 'special' ? 'SYSTEM OVERRIDE!' : 'HIT!';
+    const extra = perfect && kind === 'crit' ? 'CRITICAL · ' : perfect && kind === 'counter' ? 'COUNTER · ' : '';
+    const sub = `${extra}-${dmg} HP${this.combo >= 2 ? ` · COMBO x${this.combo}` : ''}`;
+    h.hud.combatFeedback(title, sub, perfect ? 'gold' : kind === 'crit' ? 'gold' : kind === 'counter' ? 'pink' : kind === 'special' ? 'lime' : 'white');
+    h.hud.popup(`-${dmg}`, perfect || kind === 'crit' ? 'gold' : 'lime', true);
+    audio.play('strike', Math.min(6, this.combo));
+    if (perfect) audio.play('perfect');
+    const power = ({ strike: 1, crit: 1.5, counter: 1.8, special: 2.6 } as Record<string, number>)[kind] * (perfect ? 1.3 : 1) * (1 + 0.1 * Math.min(5, this.combo));
+    h.cam.shake(Math.min(1, 0.3 + power * 0.2));
+    h.cam.kickFov(-(3 + power * 2));
+    if (perfect) {
+      this.slowT = 0.3;
+      this.slowScale = 0.15;
+      h.post.flashScreen('#ffffff', 0.4);
+    } else h.post.flashScreen(this.def.accent, 0.15 + power * 0.05);
+    this.damage(dmg, kind, perfect);
+  }
+
+  private startCine(kind: CineKind, len: number, then?: () => void): void {
+    this.cineKind = kind;
+    this.cineT = this.cineLen = len;
+    this.afterCine = then ?? null;
+  }
+
+  private clearCombat(): void {
+    this.seq = null;
+    this.nextPart = null;
+    this.cineT = 0;
+    this.cineKind = '';
+    this.afterCine = null;
+    this.cineHit = null;
+    this.slowT = this.seqHideT = 0;
+    this.reversed = false;
+    const hud = this.host.hud;
+    hud.combatSeq(null);
+    hud.combatCue(null);
+    hud.combatReverse(false);
+  }
+
+  private meta(): void {
+    this.host.hud.combatMeta(this.combo, this.meter, this.meter >= 1);
+  }
+
+  /** Legacy: a security patch pickup reached the boss. */
   patch(): void {
     this.damage(PATCH_DMG, 'patch');
   }
 
-  damage(n: number, kind: 'patch' | 'dodge'): void {
+  damage(n: number, kind: BossHitKind, perfect = false): void {
     if (this.state !== 'fight' || this.hp <= 0) return;
+    const phases = this.def.phases;
+    // One hit can't skip a phase: it stops at the next threshold.
+    if (this.phase + 1 < phases.length) n = Math.min(n, this.hp - Math.floor(phases[this.phase + 1].at * this.maxHp));
     this.hp = Math.max(0, this.hp - n);
     this.hurt = 1;
     const at = this.mouth;
-    events.emit('bossHit', { dmg: n, hp: this.hp, max: this.maxHp, kind, x: at.x, y: at.y, z: at.z });
+    events.emit('bossHit', { dmg: n, hp: this.hp, max: this.maxHp, kind, combo: this.combo, perfect, x: at.x, y: at.y, z: at.z });
     audio.play('bossHit', kind === 'patch' ? 0 : 5);
     const frac = this.hp / this.maxHp;
-    const phases = this.def.phases;
     if (this.phase + 1 < phases.length && frac <= phases[this.phase + 1].at && this.hp > 0) {
       this.phase++;
       this.shift = 2.2;
       this.roarT = 1;
       this.hitStop = 0.4;
+      this.nextPart = null;
       const p = phases[this.phase];
       const last = this.phase === phases.length - 1;
-      this.host.hud.banner(last ? `${p.label}!` : `PHASE ${this.phase + 1}`, last ? 'FINAL PHASE · IT GETS FASTER' : p.label, last ? 'red' : 'orange', 2.0);
+      this.host.hud.banner(last ? `${p.label}!` : `PHASE ${this.phase + 1}`, last ? 'ENRAGED · FASTER · DEADLIER' : `${p.label} · NEW ATTACKS`, last ? 'red' : 'orange', 2.0);
       this.host.cam.shake(0.8);
       this.host.post.glitch(1.4);
       this.host.post.flashScreen(this.def.color, 0.5);
       audio.play('bossRoar');
       events.emit('bossPhase', { phase: this.phase, label: p.label, x: at.x, y: at.y, z: at.z });
+      if (last && this.cineT <= 0) this.startCine('rage', 1.4);
+    } else if (!this.lowDone && frac <= 0.25 && this.hp > 0) {
+      this.lowDone = true;
+      this.host.hud.banner('CRITICAL DAMAGE', 'FINISH IT!', 'red', 1.5);
+      if (this.cineT <= 0) this.startCine('low', 1.0);
     }
     this.host.hud.bossHp(frac, this.phase);
     if (this.hp <= 0) this.enter('defeated');
@@ -554,6 +822,84 @@ export class BossDirector {
   // ------------------------------------------------------------ cinematics
 
   private readonly bossC = new THREE.Vector3();
+
+  /** Real-time combat: sequence timers, cinematics, follow-up weak points. */
+  private combat(dt: number): void {
+    const h = this.host;
+    if (this.seq) {
+      const s = this.seq;
+      // The exposed core pulses while the boss is open.
+      this.hurt = Math.max(this.hurt, 0.3 + 0.25 * Math.sin(this.time * 14));
+      if (s.tick(dt)) {
+        h.hud.combatStep(s.i, 'fail');
+        this.resolveSeq(false);
+      } else h.hud.combatTime(s.t < SEQ_GRACE ? 1 : s.left);
+    }
+    if (this.seqHideT > 0) {
+      this.seqHideT -= dt;
+      if (this.seqHideT <= 0 && !this.seq) {
+        h.hud.combatSeq(null);
+        const n = this.nextPart;
+        if (n && this.cineT <= 0) {
+          this.nextPart = null;
+          if (n.phase === this.phase) this.openSeq(n.kind, n.part);
+          else this.cooldown = this.gap;
+        }
+      }
+    }
+    if (this.cineT > 0) {
+      const u0 = 1 - this.cineT / this.cineLen;
+      this.cineT -= dt;
+      const u = 1 - Math.max(0, this.cineT) / this.cineLen;
+      if (this.cineKind === 'special') {
+        // Five strikes land in slow motion, then the big one.
+        for (let k = 0; k < 5; k++) {
+          const at = 0.15 + k * 0.07;
+          if (u >= at && u0 < at) {
+            const c = this.mouth;
+            events.emit('bossExplode', { x: c.x + (Math.random() - 0.5) * 3, y: c.y + (Math.random() - 0.5) * 3, z: c.z + 1, size: 0.7, color: k % 2 ? this.def.accent : '#b4ff1e' });
+            audio.play('strike', k);
+            h.cam.shake(0.35);
+          }
+        }
+        const hit = this.cineHit;
+        if (hit && !hit.done && u >= 0.55) {
+          hit.done = true;
+          this.strike(hit.dmg, 'special', hit.perfect);
+          if (this.state !== 'fight') return;
+        }
+      }
+      if (this.cineT <= 0) {
+        const f = this.afterCine;
+        this.cineT = 0;
+        this.cineKind = '';
+        this.afterCine = null;
+        this.cineHit = null;
+        if (f) f();
+        else if (!this.seq && !this.nextPart && this.cooldown <= 0) this.cooldown = this.gap;
+      }
+    }
+  }
+
+  /** Short cinematic shots: over the shoulder for counters/specials, on the boss for rage. */
+  private cineShot(u: number): void {
+    const d = this.def;
+    const m = this.model;
+    const p = this.host.player;
+    const portrait = this.host.cam.camera.aspect < 1;
+    const bc = this.bossC.copy(this.mouth);
+    if (this.cineKind === 'counter' || this.cineKind === 'special') {
+      this.shot.pos.set(p.x + 1.7 - u * 0.7, 1.25 + u * 0.5, 3.4 - u * 1.4);
+      this.shot.look.copy(bc);
+      this.shot.fov = (portrait ? 68 : 55) - u * 12;
+    } else {
+      const h = m.height * d.scale;
+      const back = (portrait ? 1.35 : 1) * Math.max(10, h * 1.2);
+      this.shot.pos.set(this.bossX + 4 - u * 2.5, m.hover * d.scale * 0.6 + 1.8 + u, -d.z + back - u * 4);
+      this.shot.look.copy(bc);
+      this.shot.fov = portrait ? 62 : 50;
+    }
+  }
 
   private introShot(T: number, L: number): void {
     const d = this.def;

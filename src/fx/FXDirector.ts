@@ -296,12 +296,27 @@ export class FXDirector {
       p.burst(x, y + 1, z, { count: 90, color: [color, '#ffffff', GOLD], speed: [6, 18], dir: [0, 0.6, 0], life: [0.6, 1.2], size: [0.2, 0.5], gravity: 9, drag: 1, world: false, jitter: 4, shape: [Shape.Shard, Shape.Spark, Shape.Pixel], spin: 8 });
       this.dark.burst(x, y + 1, z, { count: 30, color: ['#000000', '#1a0005'], speed: [2, 6], life: [0.8, 1.5], size: [1, 2.2], drag: 1.2, world: false, jitter: 5 });
     });
-    events.on('bossHit', ({ x, y, z, kind }) => {
-      p.burst(x, y, z, { count: kind === 'patch' ? 50 : 25, color: [GOLD, '#ffffff', GREEN], speed: [4, 11], life: [0.4, 0.8], size: [0.25, 0.5], drag: 1.5, world: false, jitter: 2, shape: [Shape.Spark, Shape.Shard, Shape.Glyph], spin: 6 });
-      if (kind === 'patch') this.beam(new THREE.Vector3(player.x, 1, 0), x, z, GOLD, y);
-      else this.beam(new THREE.Vector3(player.x, 0.3, 0), x, z, CYAN, y);
-      post.pulse(0.6);
-      cam.shake(0.25);
+    events.on('bossHit', ({ x, y, z, kind, combo = 0, perfect }) => {
+      if (kind === 'patch' || kind === 'dodge') {
+        p.burst(x, y, z, { count: kind === 'patch' ? 50 : 25, color: [GOLD, '#ffffff', GREEN], speed: [4, 11], life: [0.4, 0.8], size: [0.25, 0.5], drag: 1.5, world: false, jitter: 2, shape: [Shape.Spark, Shape.Shard, Shape.Glyph], spin: 6 });
+        this.beam(new THREE.Vector3(player.x, kind === 'patch' ? 1 : 0.3, 0), x, z, kind === 'patch' ? GOLD : CYAN, y);
+        post.pulse(0.6);
+        cam.shake(0.25);
+        return;
+      }
+      // Touch-attack strike: energy bolts from the runner, more with combo.
+      const power = ({ strike: 1, crit: 1.5, counter: 1.8, special: 2.6 } as Record<string, number>)[kind] * (perfect ? 1.3 : 1);
+      const col = kind === 'crit' || perfect ? GOLD : kind === 'counter' ? MAGENTA : kind === 'special' ? GREEN : CYAN;
+      const bolts = Math.min(5, 1 + Math.floor(combo / 1.5) + (power > 1.4 ? 1 : 0));
+      for (let i = 0; i < bolts; i++) this.beam(new THREE.Vector3(player.x + (i - (bolts - 1) / 2) * 0.35, 1 + (i % 2) * 0.35, 0), x + (Math.random() - 0.5) * 1.2, z, i % 2 ? '#ffffff' : col, y + (Math.random() - 0.5) * 1.2);
+      const n = Math.round(40 * power);
+      p.burst(x, y, z + 0.8, { count: n, color: [col, '#ffffff', GOLD], speed: [5 * power, 14 * power], life: [0.4, 0.9], size: [0.22, 0.5 * power], drag: 1.3, world: false, jitter: 1.5 * power, shape: [Shape.Spark, Shape.Shard, Shape.Streak], spin: 8 });
+      if (power >= 1.5) {
+        this.ring(x, y, z + 1, col, 5 * power);
+        this.ring(x, y, z + 1, '#ffffff', 3 * power);
+      }
+      post.pulse(Math.min(1, 0.5 + power * 0.2));
+      if (power >= 1.8) post.glitch(0.4 * power);
     });
     events.on('bossPhase', ({ x, y, z }) => {
       p.burst(x, y, z, { count: 120, color: [RED, MAGENTA, '#ffffff'], speed: [6, 16], life: [0.6, 1.2], size: [0.2, 0.45], drag: 1, world: false, jitter: 4, shape: [Shape.Streak, Shape.Spark, Shape.Pixel], spin: 8 });

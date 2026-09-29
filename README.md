@@ -79,7 +79,7 @@ Tests (need `npx playwright install chromium` once, and the dev server running):
 npm run test:play       # fairness solver (40 seeds x 9 km) + keyboard/touch controls
 npm run test:scenarios  # 15 scripted checks: dodge/jump/slide, near misses, damage, power-ups, boss, crash
 npm run test:progression # saves, migration, levels, coin bank, missions, set payout -> multiplier
-npm run test:boss        # all four bosses end to end (autopilot), death mid-fight + restart
+npm run test:boss        # all four bosses end to end + the combat checklist (good and average autopilot players)
 npm run test:shop        # buying, level locks, outfits, trails, upgrades, boosts, shop/profile screens, saves
 npm run test:bot        # lockstep autopilot across 24 seeds, prints balance stats
 npm run test:shots      # screenshots of key moments into shots/
@@ -106,10 +106,25 @@ npm run build:single -- out.html "label"   # one self-contained HTML file (fonts
 - **Boss fights** (`src/boss/`): MALWARE BEAST (1,050 m), FIREWALL (2,550 m), CODE BREAKER (3,450 m) and the final
   boss SYSTEM CRASH (4,450 m), then tougher MK II versions every 1,500 m. Each encounter runs
   WARNING → cinematic INTRO (slow motion, camera shots, title card) → FIGHT → DEFEATED → VICTORY cinematic
-  (explosions, THREAT ELIMINATED) → NEXT LEVEL (the next area opens). You fight with the normal controls: every
-  attack is telegraphed on the floor (red = change lane, gold = jump, cyan = slide). Gold patches hit the boss;
-  getting through a whole attack without a hit (PERFECT DODGE) chips it too. Bosses have 3 phases (the final has
-  4) and get faster and meaner as their health bar drops. Distances count running outside boss fights.
+  (explosions, THREAT ELIMINATED) → NEXT LEVEL (the next area opens). Distances count running outside boss fights.
+- **Boss combat** — DODGE → STRIKE → COMBO → PHASE CHANGE:
+  - *Dodge:* every attack is telegraphed (floor strips: red = change lane, gold = jump, cyan = slide, green = safe
+    zone; a direction cue like `◀ DODGE LEFT` / `MOVE + JUMP ▶`; heavy attacks add a red flash, shake, roar and a
+    slow-motion wind-up). Dodge with the normal controls.
+  - *Strike:* after each attack the boss opens up and a touch sequence appears (tap ● and swipes ← → ↑ ↓, e.g.
+    `TAP · LEFT · TAP`). While it is up, swipes are attack inputs, not moves. Hit by the attack → OPENING (normal
+    strike); dodged it cleanly → WEAK POINT (CRITICAL HIT); dodged a heavy attack → PERFECT DODGE → slow motion →
+    COUNTER! Fast and clean = PERFECT! (bonus damage, slow-mo, flash). Wrong input or too slow = MISS: combo reset
+    and the boss attacks straight away.
+  - *Combo + special:* each strike raises the combo (more damage, more bolts) and fills the SPECIAL meter; when full,
+    the next opening is a long sequence that unleashes a cinematic special attack.
+  - *Phases:* 3 per boss (4 for SYSTEM CRASH). A hit can't skip a phase. Each phase shortens reaction time,
+    rest and sequence windows, adds attacks and harder sequences; the last is ENRAGED (rage cinematic) and the
+    final quarter gets faster still.
+  - *Identities:* MALWARE BEAST — claw swipes, virus clones, packet volleys, shockwaves. FIREWALL — wall slams
+    (move + jump), burning lanes with safe zones, scan lasers, lane lockdowns; L/R-heavy sequences. CODE BREAKER —
+    decoy obstacles (no floor warning = fake), mirror attacks that reverse left/right, teleport strikes, the longest
+    sequences. SYSTEM CRASH — all of it, blue screens, KERNEL PANIC final attack and two weak points per opening.
 
 ## Progression
 
@@ -154,8 +169,9 @@ src/
            EventBus, GameState, Profile (saved progress: level, bank, best, missions, stats)
   game/    PlayerController, Character (procedural rig), CameraController, ComboSystem,
            ObstacleWatcher (clears / near misses), PowerUps, Missions, Shop
-  boss/    BossDirector (encounter state machine, attacks, cinematics), bosses (catalogue: stats, phases,
-           attack patterns), BossModel + models/ (the four bosses), LaneWarnings (floor telegraphs)
+  boss/    BossDirector (encounter state machine, attacks, combat loop, cinematics), bosses (catalogue: stats,
+           phases, attack patterns, sequences), Combat (touch sequences), BossModel + models/ (the four bosses),
+           LaneWarnings (floor telegraphs)
   world/   Track (data streams + motherboard), ComputerWorld (instanced districts, holo windows, core),
            Obstacles (hazards + bad bugs), Pickups (collectibles, good bugs, power-ups), Spawner (fair generation)
   render/  Quality (tiers), MaterialLib (procedural PBR), Environment (PMREM), Reflection (planar mirror),

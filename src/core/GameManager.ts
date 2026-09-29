@@ -663,7 +663,11 @@ export class GameManager {
         return;
       case GameState.Playing:
         this.actions++;
+        // Boss open: taps and swipes are attack inputs, not moves.
+        if (this.boss.combatInput(a)) return;
         if (this.boss.inputLocked && a !== 'pause') return;
+        // Mirror attacks swap left and right.
+        if (this.boss.reversed && (a === 'left' || a === 'right')) a = a === 'left' ? 'right' : 'left';
         if (a === 'left') this.player.moveLane(-1);
         else if (a === 'right') this.player.moveLane(1);
         else if (a === 'jump') this.player.jump();
@@ -954,7 +958,7 @@ export class GameManager {
     if (this.grazed && this.grazed.dist + this.grazed.depth < this.distance - 1) this.grazed = null;
 
     this.obstacles.forEach((o) => {
-      if (hit || o.destroyed || o === this.grazed) return;
+      if (hit || o.destroyed || o.fake || o === this.grazed) return;
       this.obstacles.getCollider(o, this.distance, this.oBox);
       if (!overlaps(this.pBox, this.oBox)) return;
       this.obstacles.getCollider(o, this.prevDistance, this.oPrev);

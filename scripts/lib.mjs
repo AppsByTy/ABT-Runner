@@ -27,7 +27,7 @@ export const INSTALL_BOT = () => {
     const threats = (lane, from, to) => {
       let best = null;
       g.obstacles.forEach((o) => {
-        if (o.destroyed) return;
+        if (o.destroyed || o.fake) return;
         const lanes = o.toLane >= 0 ? [o.lane, o.toLane] : [o.lane];
         if (!lanes.includes(lane)) return;
         const ahead = o.dist - g.distance;
@@ -38,8 +38,24 @@ export const INSTALL_BOT = () => {
       return best;
     };
     let cd = 0;
+    // Boss sequences, played like a person: reaction time, then one input
+    // every `step` seconds. skill.miss = chance to fumble an input.
+    const skill = (window.__botSkill ??= { react: 0.35, step: 0.26, miss: 0 });
+    const ACT = { T: 'confirm', L: 'left', R: 'right', U: 'jump', D: 'slide' };
+    const WRONG = { T: 'left', L: 'right', R: 'left', U: 'slide', D: 'jump' };
+    let seqRef = null, fumble = false;
+    const move = (a) => g.input.trigger(g.boss.reversed && (a === 'left' || a === 'right') ? (a === 'left' ? 'right' : 'left') : a);
     return (dt) => {
       cd -= dt;
+      const sq = g.boss.seq;
+      if (sq && sq.state === 'live' && g.state === 'playing') {
+        if (sq !== seqRef) { seqRef = sq; fumble = Math.random() < skill.miss; }
+        if (sq.t >= 0.3 + skill.react + sq.i * skill.step) {
+          const gl = sq.steps[sq.i];
+          g.input.trigger(fumble && sq.i === sq.steps.length - 1 ? WRONG[gl] : ACT[gl]);
+        }
+        return;
+      }
       if (g.state !== 'playing' || cd > 0) return;
       const s = g.speed;
       const look = s * 1.25;
@@ -70,7 +86,7 @@ export const INSTALL_BOT = () => {
         if (target !== P.lane) target = P.lane + (target > P.lane ? 1 : -1);
       }
       if (target !== P.lane) {
-        g.input.trigger(target < P.lane ? 'left' : 'right');
+        move(target < P.lane ? 'left' : 'right');
         cd = 0.09;
       } else if (cur && cur.cls === 'low' && tOf(cur) < 0.2 && P.grounded) {
         g.input.trigger('jump');

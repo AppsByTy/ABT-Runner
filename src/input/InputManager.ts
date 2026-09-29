@@ -62,6 +62,8 @@ export class InputManager {
         a = 'pause';
         break;
       case 'Enter':
+      case 'KeyE':
+      case 'KeyF':
         a = 'confirm';
         break;
     }
@@ -99,7 +101,8 @@ export class InputManager {
 
   private onUp = (e: PointerEvent): void => {
     if (e.pointerId !== this.pointerId) return;
-    const quick = performance.now() - this.startT < 300;
+    // Forgiving taps: a short press that never became a swipe.
+    const quick = performance.now() - this.startT < 380;
     if (!this.consumed && quick) this.trigger('confirm');
     this.pointerId = null;
   };

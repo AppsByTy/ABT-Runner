@@ -44,6 +44,10 @@ export type SoundId =
   | 'bossExplode'
   | 'bossTelegraph'
   | 'bossVictory'
+  | 'seqTick'
+  | 'strike'
+  | 'perfect'
+  | 'seqMiss'
   | 'deleted'
   | 'crash'
   | 'reboot'
@@ -860,6 +864,29 @@ export class AudioManager {
       case 'bossTelegraph':
         this.tone(1320, 0.07, { type: 'square', gain: 0.035, filter: 5000 });
         this.tone(990, 0.09, { type: 'square', gain: 0.035, at: 0.09, filter: 5000 });
+        break;
+      case 'seqTick':
+        // One input of an attack sequence landed: a bright rising blip.
+        this.tone(midi(84 + pitch), 0.07, { type: 'square', gain: 0.05, filter: 6000 });
+        this.tone(midi(91 + pitch), 0.09, { type: 'triangle', gain: 0.05, at: 0.03 });
+        break;
+      case 'strike':
+        // The runner's attack lands: whoosh, heavy impact, ring.
+        this.noise(0.18, { freq: 900, freqTo: 5000, q: 0.8, gain: 0.18, attack: 0.08 });
+        kick(ctx, this.sfxBus, t + 0.12, 1.1 + pitch * 0.05, 1);
+        this.tone(midi(48 + pitch), 0.45, { type: 'sawtooth', gain: 0.1, slideTo: midi(36 + pitch), filter: 2200, at: 0.12, send: 0.4 });
+        bell(ctx, fx, t + 0.12, 84 + pitch, 0.5, 0.7, 3.1, 0.35);
+        this.sub(70, 0.4, 0.5, 0.12);
+        break;
+      case 'perfect':
+        stab(ctx, fx, t, [72, 76, 79, 84], 0.9, 0.8, 6000);
+        [[84, 0], [88, 0.07], [91, 0.14], [96, 0.21]].forEach(([n, at]) => bell(ctx, fx, t + at, n, 0.9, 0.7, 2.4, 0.5));
+        this.noise(0.5, { freq: 7000, type: 'highpass', gain: 0.1, send: 0.8 });
+        break;
+      case 'seqMiss':
+        this.tone(220, 0.3, { type: 'square', gain: 0.1, slideTo: 90, filter: 1600 });
+        this.tone(233, 0.3, { type: 'sawtooth', gain: 0.06, slideTo: 95, filter: 1400 });
+        glitch(ctx, fx, t + 0.02, 0.16, 0.6);
         break;
       case 'bossVictory':
         [[60, 0], [64, 0.12], [67, 0.24], [72, 0.36], [76, 0.5], [79, 0.62]].forEach(([n, at]) => bell(ctx, fx, t + at, n + 12, 1.4, 0.9, 3.5, 0.6));

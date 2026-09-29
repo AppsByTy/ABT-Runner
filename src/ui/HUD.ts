@@ -78,6 +78,9 @@ const missionRows = (list: MissionView[]): string =>
 const fmt = (n: number): string => Math.floor(n).toLocaleString('en-US');
 
 /** DOM overlay styled as a developer dashboard. */
+const GLYPH_ICON: Record<string, string> = { T: '●', L: '←', R: '→', U: '↑', D: '↓' };
+const GLYPH_WORD: Record<string, string> = { T: 'TAP', L: 'LEFT', R: 'RIGHT', U: 'UP', D: 'DOWN' };
+
 export class HUD {
   readonly root: HTMLDivElement;
   private readonly $: (id: string) => HTMLElement;
@@ -149,7 +152,12 @@ export class HUD {
       <div class="bossbar" id="h-bossbar">
         <div class="bb-top"><span class="bb-name" id="h-bbname"></span><span class="bb-phase" id="h-bbphase">PHASE 1</span></div>
         <div class="bb-bar"><i class="bb-trail" id="h-bbtrail"></i><i class="bb-fill" id="h-bbfill"></i><span class="bb-marks" id="h-bbmarks"></span></div>
+        <div class="bb-sub"><span class="bb-combo" id="h-bbcombo"></span><span class="bb-special" id="h-bbspecial"><em id="h-bbsplbl">SPECIAL</em><span class="bb-sp"><i id="h-bbsp"></i></span></span></div>
       </div>
+      <div class="bseq" id="h-bseq"><div class="bs-title" id="h-bstitle"></div><div class="bs-steps" id="h-bssteps">${'<span class="bs-step"><b></b><small></small></span>'.repeat(8)}</div><div class="bs-time"><i id="h-bstime"></i></div></div>
+      <div class="bcue" id="h-bcue"></div>
+      <div class="bfb" id="h-bfb"><b id="h-bfbt"></b><span id="h-bfbs"></span></div>
+      <div class="brev" id="h-brev">⇄ CONTROLS REVERSED</div>
       <div class="cine" id="h-cine"><i class="cine-top"></i><i class="cine-bot"></i></div>
       <div class="bwarn" id="h-bwarn"><div class="bw-stripe"></div><div class="bw-title">⚠ WARNING ⚠</div><div class="bw-sub" id="h-bwsub"></div><div class="bw-stripe"></div></div>
       <div class="btitle" id="h-btitle2"><div class="bt-tag" id="h-bttag"></div><div class="bt-name" id="h-btname"></div><div class="bt-sub" id="h-btsub"></div></div>
@@ -439,6 +447,9 @@ export class HUD {
     if (state !== 'dying') this.$('h-crash').classList.remove('show');
     if (state === 'gameover' || state === 'ready') {
       this.bossBar(null);
+      this.combatSeq(null);
+      this.combatCue(null);
+      this.combatReverse(false);
       this.bossWarning(null);
       this.bossCine(false);
       this.bossVictory(null);
@@ -605,6 +616,89 @@ export class HUD {
     this.$('h-bbfill').style.transform = f;
     this.$('h-bbtrail').style.transform = f;
     this.$('h-bbphase').textContent = `PHASE ${phase + 1}`;
+  }
+
+  // ------------------------------------------------------------ boss combat
+
+  /** Combo counter + special meter under the boss bar. */
+  combatMeta(combo: number, meter: number, ready: boolean): void {
+    const c = this.$('h-bbcombo');
+    c.textContent = combo >= 2 ? `COMBO x${combo}` : '';
+    c.classList.toggle('hot', combo >= 5);
+    if (combo >= 2) {
+      c.classList.remove('bump');
+      void c.offsetWidth;
+      c.classList.add('bump');
+    }
+    this.$('h-bbsp').style.transform = `scaleX(${Math.min(1, meter).toFixed(3)})`;
+    this.$('h-bbspecial').classList.toggle('ready', ready);
+    this.$('h-bbsplbl').textContent = ready ? 'SPECIAL READY' : 'SPECIAL';
+  }
+
+  /** Show an attack sequence (T tap, L/R/U/D swipes), or hide it. */
+  combatSeq(cfg: { title: string; steps: string[]; kind: string } | null): void {
+    const el = this.$('h-bseq');
+    if (cfg) {
+      this.$('h-bstitle').textContent = cfg.title;
+      const chips = this.$('h-bssteps').children;
+      for (let i = 0; i < chips.length; i++) {
+        const ch = chips[i] as HTMLElement;
+        const g = cfg.steps[i];
+        ch.style.display = g ? '' : 'none';
+        if (!g) continue;
+        ch.className = `bs-step g-${g}`;
+        ch.firstElementChild!.textContent = GLYPH_ICON[g] ?? '?';
+        ch.lastElementChild!.textContent = GLYPH_WORD[g] ?? '';
+      }
+      el.className = `bseq k-${cfg.kind}`;
+      this.$('h-bstime').style.transform = 'scaleX(1)';
+      void el.offsetWidth;
+      el.classList.add('show');
+    } else el.classList.remove('show');
+  }
+
+  /** Mark sequence progress: step i entered (ok), the wrong one (fail), or all done. */
+  combatStep(i: number, state: 'ok' | 'fail' | 'done'): void {
+    const chips = this.$('h-bssteps').children;
+    if (state === 'fail') {
+      (chips[i] as HTMLElement | undefined)?.classList.add('bad');
+      this.$('h-bseq').classList.add('failed');
+      return;
+    }
+    (chips[i - 1] as HTMLElement | undefined)?.classList.add('on');
+    if (state === 'done') this.$('h-bseq').classList.add('done');
+  }
+
+  /** Time left in the window, 0..1 (transform only). */
+  combatTime(frac: number): void {
+    this.$('h-bstime').style.transform = `scaleX(${Math.max(0, frac).toFixed(3)})`;
+  }
+
+  /** Big centre call-out: PERFECT! / CRITICAL HIT! / MISS / COUNTER! ... */
+  combatFeedback(title: string, sub: string, tone: 'gold' | 'red' | 'cyan' | 'pink' | 'lime' | 'white'): void {
+    const el = this.$('h-bfb');
+    this.$('h-bfbt').textContent = title;
+    this.$('h-bfbs').textContent = sub;
+    el.className = `bfb ${tone}`;
+    void el.offsetWidth;
+    el.classList.add('go');
+  }
+
+  /** Direction cue for the next hazard (arrow + action), or hide it. */
+  combatCue(text: string | null, tone: 'move' | 'jump' | 'slide' | 'safe' = 'move'): void {
+    const el = this.$('h-bcue');
+    if (!text) {
+      el.classList.remove('go');
+      return;
+    }
+    el.textContent = text;
+    el.className = `bcue ${tone}`;
+    void el.offsetWidth;
+    el.classList.add('go');
+  }
+
+  combatReverse(on: boolean): void {
+    this.$('h-brev').classList.toggle('show', on);
   }
 
   bossVictory(cfg: { title: string; sub: string; name: string; rewards: string; color: string } | null): void {

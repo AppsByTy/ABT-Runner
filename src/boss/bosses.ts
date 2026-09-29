@@ -22,6 +22,8 @@ export interface Row {
   lanes: number[];
   kind: ObstacleKind;
   depth?: number;
+  /** Decoy hologram: harmless, flickers, no floor warning (Code Breaker). */
+  fake?: boolean;
 }
 
 export interface AttackCtx {
@@ -42,6 +44,24 @@ export interface AttackDef {
   rows: (c: AttackCtx) => Row[];
   /** Optional screen effect while it plays. */
   fx?: 'glitch' | 'bluescreen' | 'teleport';
+  /** Big telegraphed attack: slow motion wind-up; a clean dodge earns a COUNTER. */
+  heavy?: boolean;
+  /** Area attack: the open lanes light up green as safe zones. */
+  area?: boolean;
+  /** Left/right controls are swapped while it plays. */
+  reverse?: boolean;
+}
+
+/** The player's side of the fight: touch attack sequences (see Combat.ts). */
+export interface CombatDef {
+  /** Sequence pool per phase (T tap, L/R swipe left/right, U/D swipe up/down). */
+  seqs: string[][];
+  /** The long sequence that unleashes the special attack. */
+  special: string;
+  /** Seconds allowed per input in phase 1 (shrinks each phase). */
+  perStep: number;
+  /** Weak points per opening, per phase (the final boss has several). */
+  weak?: number[];
 }
 
 export interface PhaseDef {
@@ -72,6 +92,7 @@ export interface BossDef {
   lead: number;
   /** Rest between attacks (s), phase 1. */
   gap: number;
+  combat: CombatDef;
 }
 
 // ------------------------------------------------------------ helpers
@@ -85,17 +106,79 @@ const lanes = (c: AttackCtx, n: number): number[] => {
   return [...new Set(pick)];
 };
 /** Walls in two lanes; the free lane moves by at most `step` lanes each row. */
-const zigzag = (c: AttackCtx, rows: number, spacing: number, depth: number, step = 1): Row[] => {
+const zigzag = (c: AttackCtx, rows: number, spacing: number, depth: number, step = 1, kind: ObstacleKind = 'corruptBlock'): Row[] => {
   const out: Row[] = [];
   let free = c.rng.pick(others(c.lane));
   for (let i = 0; i < rows; i++) {
-    out.push({ at: i * spacing, lanes: others(free), kind: 'corruptBlock', depth });
+    out.push({ at: i * spacing, lanes: others(free), kind, depth });
     const opts = ALL.filter((l) => l !== free && Math.abs(l - free) <= step);
     free = c.rng.pick(opts);
   }
   return out;
 };
 const full = (kind: ObstacleKind, at: number): Row => ({ at, lanes: [...ALL], kind });
+
+// ------------------------------------------------------------ shared attacks
+
+/** Claws rake two lanes from one side: dodge to the open edge (then the middle). */
+const CLAW: AttackDef = {
+  anim: 'slam',
+  call: 'CLAW SWIPE · DODGE TO THE OPEN SIDE',
+  heavy: true,
+  rows: (c) => {
+    const free = c.rng.pick([0, 2]);
+    const out: Row[] = [{ at: 0, lanes: others(free), kind: 'corruptBlock', depth: 3 }];
+    if (c.phase >= 1) out.push({ at: 1.15, lanes: others(1), kind: 'corruptBlock', depth: 3 });
+    if (c.phase >= 2) out.push({ at: 2.2, lanes: others(2 - free), kind: 'corruptBlock', depth: 3 });
+    return out;
+  },
+};
+/** Hard wall in two lanes, fire in the third: move AND jump. */
+const WALLSLAM: AttackDef = {
+  anim: 'lockdown',
+  call: 'WALL SLAM · MOVE, THEN JUMP',
+  heavy: true,
+  rows: (c) => {
+    const free = c.rng.pick(others(c.lane));
+    const out: Row[] = [{ at: 0, lanes: others(free), kind: 'corruptBlock', depth: 4 }, { at: 0, lanes: [free], kind: 'firewall' }];
+    if (c.phase >= 2) {
+      const f2 = c.rng.pick(ALL.filter((l) => Math.abs(l - free) === 1));
+      out.push({ at: 1.25, lanes: others(f2), kind: 'corruptBlock', depth: 4 }, { at: 1.25, lanes: [f2], kind: 'firewall' });
+    }
+    return out;
+  },
+};
+/** Burning lanes: long walls that deny two lanes; the safe zone glows green. */
+const BURN: AttackDef = {
+  anim: 'flame',
+  call: 'BURNING LANES · GET TO THE GREEN SAFE ZONE',
+  area: true,
+  rows: (c) => zigzag(c, 1 + Math.min(2, c.phase), 1.35, 13),
+};
+/** Decoys: holograms fill the open lanes. Trust the floor warnings. */
+const DECOY: AttackDef = {
+  anim: 'glitch',
+  call: 'FAKE CODE · ONLY WARNED LANES ARE REAL',
+  fx: 'glitch',
+  rows: (c) => {
+    const out: Row[] = [];
+    const n = 1 + Math.min(2, c.phase);
+    for (let i = 0; i < n; i++) {
+      const real = lanes(c, c.phase >= 1 ? 2 : 1);
+      out.push({ at: i * 1.1, lanes: real, kind: 'corruptBlock', depth: 4 });
+      out.push({ at: i * 1.1, lanes: ALL.filter((l) => !real.includes(l)), kind: 'corruptBlock', depth: 4, fake: true });
+    }
+    return out;
+  },
+};
+/** Mirror: controls reversed while walls weave. */
+const MIRROR: AttackDef = {
+  anim: 'rain',
+  call: 'CONTROLS REVERSED · SWIPE THE OTHER WAY',
+  fx: 'glitch',
+  reverse: true,
+  rows: (c) => zigzag(c, 2 + Math.min(1, c.phase), 1.25, 4),
+};
 
 // ------------------------------------------------------------ the bosses
 
@@ -115,11 +198,18 @@ export const BOSSES: readonly BossDef[] = [
     lead: 1.75,
     gap: 2.1,
     phases: [
-      { at: 1, label: 'HUNTING', attacks: ['spit', 'slam'] },
-      { at: 0.62, label: 'FRENZY', attacks: ['spit', 'slam', 'brood'] },
-      { at: 0.3, label: 'ENRAGED', attacks: ['spit', 'slam', 'brood'] },
+      { at: 1, label: 'HUNTING', attacks: ['spit', 'claw', 'slam'] },
+      { at: 0.62, label: 'FRENZY', attacks: ['claw', 'brood', 'clones', 'spit'] },
+      { at: 0.3, label: 'ENRAGED', attacks: ['claw', 'clones', 'slam', 'brood'] },
     ],
+    combat: { seqs: [['TTT', 'TLT', 'RTT'], ['TLT', 'RTT', 'TTU', 'LTR'], ['TTU', 'TLRT', 'RTLT', 'TDTU']], special: 'TTLRUT', perStep: 0.62 },
     attacks: {
+      claw: CLAW,
+      clones: {
+        anim: 'brood',
+        call: 'VIRUS CLONES · WEAVE BETWEEN LANES',
+        rows: (c) => zigzag(c, 3 + c.phase, 0.62 - c.phase * 0.04, 1, 1, 'glitchBug'),
+      },
       spit: {
         anim: 'spit',
         call: 'CORRUPT PACKETS · JUMP OR DODGE',
@@ -128,6 +218,7 @@ export const BOSSES: readonly BossDef[] = [
       slam: {
         anim: 'slam',
         call: 'SHOCKWAVE · JUMP',
+        heavy: true,
         rows: (c) => [full('shock', 0), ...(c.phase >= 1 ? [{ at: 1.0, lanes: lanes(c, 2), kind: 'packet' as const }] : [])],
       },
       brood: {
@@ -152,11 +243,14 @@ export const BOSSES: readonly BossDef[] = [
     lead: 1.7,
     gap: 1.9,
     phases: [
-      { at: 1, label: 'SCANNING', attacks: ['flame', 'lockdown'] },
-      { at: 0.65, label: 'LOCKDOWN', attacks: ['flame', 'lockdown', 'scan'] },
-      { at: 0.32, label: 'MELTDOWN', attacks: ['flame', 'lockdown', 'scan'] },
+      { at: 1, label: 'SCANNING', attacks: ['flame', 'lockdown', 'wallslam'] },
+      { at: 0.65, label: 'LOCKDOWN', attacks: ['burn', 'scan', 'wallslam', 'lockdown'] },
+      { at: 0.32, label: 'MELTDOWN', attacks: ['burn', 'scan', 'wallslam', 'flame', 'lockdown'] },
     ],
+    combat: { seqs: [['TLT', 'TRT', 'LRT'], ['LRT', 'TRL', 'RLTT', 'TLRT'], ['LRLT', 'RLRT', 'TLRU', 'LTRT']], special: 'LRLRTU', perStep: 0.58 },
     attacks: {
+      wallslam: WALLSLAM,
+      burn: BURN,
       flame: {
         anim: 'flame',
         call: 'FLAME WALL · JUMP',
@@ -170,6 +264,7 @@ export const BOSSES: readonly BossDef[] = [
       scan: {
         anim: 'scan',
         call: 'SCAN LASER · SLIDE',
+        heavy: true,
         rows: (c) => [full('laser', 0), ...(c.phase >= 1 ? [{ at: 1.0, lanes: lanes(c, 2), kind: 'firewall' as const }] : []), ...(c.phase >= 2 ? [full('laser', 1.9)] : [])],
       },
     },
@@ -189,14 +284,18 @@ export const BOSSES: readonly BossDef[] = [
     lead: 1.6,
     gap: 1.8,
     phases: [
-      { at: 1, label: 'DECRYPTING', attacks: ['slash', 'glitch'] },
-      { at: 0.66, label: 'BRUTE FORCE', attacks: ['slash', 'rain', 'glitch'] },
-      { at: 0.33, label: 'OVERCLOCKED', attacks: ['slash', 'rain', 'glitch'] },
+      { at: 1, label: 'DECRYPTING', attacks: ['slash', 'decoy', 'glitch'] },
+      { at: 0.66, label: 'BRUTE FORCE', attacks: ['mirror', 'decoy', 'slash', 'rain'] },
+      { at: 0.33, label: 'OVERCLOCKED', attacks: ['mirror', 'decoy', 'slash', 'rain', 'glitch'] },
     ],
+    combat: { seqs: [['TLRT', 'RTLT', 'TUTD'], ['TLRT', 'UDTT', 'RLTU', 'TDUT'], ['TLRDT', 'RUTLT', 'LRUDT', 'TTLRT']], special: 'TLRUDTT', perStep: 0.56 },
     attacks: {
+      decoy: DECOY,
+      mirror: MIRROR,
       slash: {
         anim: 'slash',
         call: 'BLADE SWEEP · SLIDE, THEN JUMP',
+        heavy: true,
         rows: (c) => [full('laser', 0), ...(c.phase >= 1 ? [full('shock', 0.95)] : []), ...(c.phase >= 2 ? [full('laser', 1.8)] : [])],
       },
       rain: {
@@ -227,12 +326,23 @@ export const BOSSES: readonly BossDef[] = [
     lead: 1.6,
     gap: 1.8,
     phases: [
-      { at: 1, label: 'ERROR', attacks: ['storm', 'collapse'] },
-      { at: 0.72, label: 'CORRUPTION', attacks: ['storm', 'collapse', 'bluescreen'] },
-      { at: 0.46, label: 'MELTDOWN', attacks: ['storm', 'collapse', 'bluescreen'] },
-      { at: 0.2, label: 'KERNEL PANIC', attacks: ['panic', 'bluescreen', 'collapse'] },
+      { at: 1, label: 'ERROR', attacks: ['storm', 'collapse', 'claw'] },
+      { at: 0.72, label: 'CORRUPTION', attacks: ['bluescreen', 'wallslam', 'decoy', 'collapse'] },
+      { at: 0.46, label: 'MELTDOWN', attacks: ['mirror', 'burn', 'claw', 'bluescreen', 'storm'] },
+      { at: 0.2, label: 'KERNEL PANIC', attacks: ['panic', 'mirror', 'wallslam', 'decoy'] },
     ],
+    combat: {
+      seqs: [['TLT', 'RTT', 'TTU'], ['TLRT', 'RTLT', 'TTDU'], ['TLRDT', 'LRLTU', 'UTDTR'], ['TLRUT', 'RLUDT', 'TTLRDU']],
+      special: 'TLRUDLRT',
+      perStep: 0.56,
+      weak: [1, 1, 2, 2],
+    },
     attacks: {
+      claw: { ...CLAW, anim: 'collapse' },
+      wallslam: { ...WALLSLAM, anim: 'collapse' },
+      burn: { ...BURN, anim: 'storm' },
+      decoy: { ...DECOY, anim: 'storm' },
+      mirror: { ...MIRROR, anim: 'storm' },
       storm: {
         anim: 'storm',
         call: 'ERROR STORM · SLIDE OR DODGE',
@@ -251,8 +361,9 @@ export const BOSSES: readonly BossDef[] = [
       },
       panic: {
         anim: 'collapse',
-        call: 'KERNEL PANIC',
+        call: 'KERNEL PANIC · FINAL ATTACK',
         fx: 'glitch',
+        heavy: true,
         rows: (c) => [
           { at: 0, lanes: lanes(c, 2), kind: 'packet' },
           full('laser', 0.8),
