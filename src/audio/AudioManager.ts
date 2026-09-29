@@ -1,6 +1,6 @@
 import { HipHopEngine, type MusicMode } from './HipHopEngine';
 import { MIX, MIX_TITLE, tracksFor, type MusicTrack } from './MusicFiles';
-import { bell, glitch, kick, makeImpulse, midi, noiseBuffer, satCurve, sweep, vox, type Buses } from './synth';
+import { bell, glitch, kick, makeImpulse, midi, noiseBuffer, satCurve, stab, sweep, vox, type Buses } from './synth';
 
 /**
  * All game audio goes through here.
@@ -37,6 +37,13 @@ export type SoundId =
   | 'bossAlarm'
   | 'bossPatch'
   | 'bossDeleted'
+  | 'bossRiser'
+  | 'bossImpact'
+  | 'bossRoar'
+  | 'bossHit'
+  | 'bossExplode'
+  | 'bossTelegraph'
+  | 'bossVictory'
   | 'deleted'
   | 'crash'
   | 'reboot'
@@ -652,7 +659,7 @@ export class AudioManager {
     o.stop(t0 + dur + 0.05);
   }
 
-  private noise(dur: number, opts: { gain?: number; type?: BiquadFilterType; freq?: number; freqTo?: number; q?: number; at?: number; send?: number } = {}): void {
+  private noise(dur: number, opts: { gain?: number; type?: BiquadFilterType; freq?: number; freqTo?: number; q?: number; at?: number; send?: number; attack?: number } = {}): void {
     const ctx = this.ctx!;
     const t0 = ctx.currentTime + (opts.at ?? 0);
     const src = ctx.createBufferSource();
@@ -664,7 +671,11 @@ export class AudioManager {
     if (opts.freqTo) f.frequency.exponentialRampToValueAtTime(opts.freqTo, t0 + dur);
     f.Q.value = opts.q ?? 1;
     const g = ctx.createGain();
-    g.gain.setValueAtTime(opts.gain ?? 0.2, t0);
+    if (opts.attack) {
+      // Swell (risers), then a short release.
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(opts.gain ?? 0.2, t0 + opts.attack);
+    } else g.gain.setValueAtTime(opts.gain ?? 0.2, t0);
     g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
     src.connect(f).connect(g).connect(this.sfxBus);
     if (opts.send) {
@@ -812,6 +823,49 @@ export class AudioManager {
         this.noise(1.6, { freq: 3000, freqTo: 80, q: 0.7, gain: 0.32, send: 0.6 });
         this.sub(80, 1.2, 0.5);
         [60, 64, 67, 72, 76].forEach((n, i) => bell(ctx, fx, t + 0.5 + i * 0.08, n + 12, 1.0, 0.9, 3.5, 0.5));
+        break;
+      case 'bossRiser':
+        // Tension build under the boss entrance.
+        this.noise(2.6, { freq: 300, freqTo: 6000, q: 1.2, gain: 0.16, attack: 2.3, send: 0.5 });
+        this.tone(55, 2.6, { type: 'sawtooth', gain: 0.1, slideTo: 220, attack: 2.2, filter: 1200, send: 0.3 });
+        this.tone(55.6, 2.6, { type: 'sawtooth', gain: 0.08, slideTo: 221, attack: 2.2, filter: 900 });
+        break;
+      case 'bossImpact':
+        // The boss lands / arrives: sub drop, crunch and a long tail.
+        this.sub(70, 1.6, 0.7);
+        kick(ctx, this.sfxBus, t, 1.4, 1.3);
+        this.noise(1.4, { freq: 1600, freqTo: 60, q: 0.6, gain: 0.34, send: 0.8 });
+        this.noise(0.25, { freq: 5000, type: 'highpass', gain: 0.12 });
+        glitch(ctx, fx, t + 0.15, 0.4, 0.8);
+        break;
+      case 'bossRoar':
+        // Distorted digital growl with a vocal formant.
+        [62, 65.5, 93, 124].forEach((f, i) => this.tone(f, 1.5, { type: 'sawtooth', gain: 0.09, slideTo: f * 0.62, attack: 0.08, filter: 900 + i * 300, detune: i * 9, send: 0.4 }));
+        vox(ctx, fx, t + 0.05, 38, 1.3, 'a', 1, -7);
+        this.noise(1.3, { freq: 700, freqTo: 180, q: 2, gain: 0.16, send: 0.5 });
+        break;
+      case 'bossHit':
+        // Metallic clang when a patch lands on the boss.
+        this.tone(midi(55 + pitch), 0.35, { type: 'square', gain: 0.07, slideTo: midi(43 + pitch), filter: 3000, send: 0.3 });
+        bell(ctx, fx, t, 79 + pitch, 0.6, 0.8, 2.7, 0.4);
+        this.noise(0.16, { freq: 6000, type: 'highpass', gain: 0.09 });
+        this.sub(90, 0.3, 0.3);
+        break;
+      case 'bossExplode':
+        this.noise(2.2, { freq: 2600, freqTo: 50, q: 0.5, gain: 0.4, send: 0.8 });
+        this.sub(55, 1.8, 0.8);
+        kick(ctx, this.sfxBus, t, 1.5, 1.4);
+        glitch(ctx, fx, t + 0.2, 0.9, 1);
+        break;
+      case 'bossTelegraph':
+        this.tone(1320, 0.07, { type: 'square', gain: 0.035, filter: 5000 });
+        this.tone(990, 0.09, { type: 'square', gain: 0.035, at: 0.09, filter: 5000 });
+        break;
+      case 'bossVictory':
+        [[60, 0], [64, 0.12], [67, 0.24], [72, 0.36], [76, 0.5], [79, 0.62]].forEach(([n, at]) => bell(ctx, fx, t + at, n + 12, 1.4, 0.9, 3.5, 0.6));
+        stab(ctx, fx, t + 0.75, [60, 64, 67, 72], 1.6, 0.9, 4200);
+        vox(ctx, fx, t + 0.78, 72, 1.1, 'a', 0.8, 5);
+        this.sub(65, 1.2, 0.4, 0.75);
         break;
       case 'deleted':
         this.noise(0.18, { freq: 4000, freqTo: 800, q: 3, gain: 0.11 });

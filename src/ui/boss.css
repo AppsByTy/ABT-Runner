@@ -1,0 +1,282 @@
+/*
+ * Boss encounters: health bar, letterbox, warning, title and victory cards.
+ * Values are set once per event; animations are opacity/transform only.
+ */
+
+.bossbar {
+  position: absolute;
+  left: 50%;
+  top: calc(var(--safe-top) + 168px);
+  width: min(92vw, 520px);
+  transform: translate(-50%, -8px);
+  opacity: 0;
+  transition: opacity 0.35s, transform 0.35s;
+  pointer-events: none;
+  --bc: #ff2a4a;
+}
+
+.bossbar.show {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.bb-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 4px;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.9);
+}
+
+.bb-name {
+  font: 400 17px/1 var(--display);
+  letter-spacing: 3px;
+  color: #fff;
+}
+
+.bb-phase {
+  font: 800 10px/1 var(--mono);
+  letter-spacing: 1.5px;
+  color: var(--bc);
+}
+
+.bb-bar {
+  position: relative;
+  height: 12px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  box-shadow: 0 0 14px rgba(0, 0, 0, 0.6);
+}
+
+.bb-bar i {
+  position: absolute;
+  inset: 0;
+  transform-origin: left;
+}
+
+.bb-trail {
+  background: rgba(255, 255, 255, 0.75);
+  transition: transform 0.6s 0.25s ease-out;
+}
+
+.bb-fill {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.35), transparent 45%), var(--bc);
+  transition: transform 0.15s ease-out;
+}
+
+.bb-marks i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: rgba(0, 0, 0, 0.8);
+}
+
+.hud.boss-on .cards {
+  transform: translateY(40px);
+}
+
+.hud.boss-on .m-toast {
+  margin-top: 40px;
+}
+
+/* Letterbox */
+.cine i {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 11vh;
+  background: #000;
+  transition: transform 0.5s cubic-bezier(0.3, 0.8, 0.3, 1);
+  z-index: 8;
+}
+
+.cine-top {
+  top: 0;
+  transform: translateY(-101%);
+}
+
+.cine-bot {
+  bottom: 0;
+  transform: translateY(101%);
+}
+
+.cine.show i {
+  transform: none;
+}
+
+.hud.cine-on .dash,
+.hud.cine-on .popups,
+.hud.cine-on .cards {
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+/* Warning */
+.bwarn {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 30%;
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  z-index: 7;
+}
+
+.bwarn.show {
+  opacity: 1;
+  visibility: visible;
+}
+
+.bw-stripe {
+  width: 100%;
+  height: 16px;
+  background: repeating-linear-gradient(-45deg, #ff2a4a 0 14px, #1a0004 14px 28px);
+  opacity: 0.85;
+}
+
+.bw-title {
+  font: 400 clamp(34px, 11vw, 64px)/1 var(--display);
+  letter-spacing: 6px;
+  color: #ff2a4a;
+  text-shadow: 0 0 24px rgba(255, 42, 74, 0.8), 0 3px 0 #000;
+}
+
+.bwarn.show .bw-title,
+.bwarn.show .bw-sub {
+  animation: bwBlink 0.4s steps(2) infinite;
+}
+
+.bw-sub {
+  font: 800 13px/1 var(--mono);
+  letter-spacing: 3px;
+  color: #fff;
+  text-shadow: 0 2px 6px #000;
+}
+
+@keyframes bwBlink {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* Title card */
+.btitle {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(11vh + 22px);
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+  text-align: center;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 9;
+  --bc: #ff2a4a;
+}
+
+.btitle.go {
+  animation: btIn 3.2s cubic-bezier(0.2, 0.9, 0.3, 1) forwards;
+}
+
+@keyframes btIn {
+  0% {
+    opacity: 0;
+    transform: scale(1.35);
+  }
+  10% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  86% {
+    opacity: 1;
+    transform: scale(1.03);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.05);
+  }
+}
+
+.bt-tag {
+  font: 800 11px/1 var(--mono);
+  letter-spacing: 4px;
+  color: var(--bc);
+  text-shadow: 0 2px 6px #000;
+}
+
+.bt-name {
+  font: 400 clamp(40px, 13vw, 92px)/0.95 var(--display);
+  letter-spacing: 4px;
+  color: #fff;
+  text-shadow: 0 0 26px var(--bc), 3px 0 0 var(--bc), -3px 0 0 #00e5ff, 0 4px 0 #000;
+}
+
+.bt-sub {
+  font: 700 12px/1.2 var(--ui);
+  letter-spacing: 4px;
+  color: #e8f6ff;
+  text-shadow: 0 2px 6px #000;
+}
+
+/* Victory card */
+.bwin {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 22%;
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  text-align: center;
+  opacity: 0;
+  transform: scale(1.2);
+  transition: opacity 0.35s, transform 0.5s cubic-bezier(0.2, 1.3, 0.4, 1);
+  pointer-events: none;
+  z-index: 9;
+  --bc: #ff2a4a;
+}
+
+.bwin.show {
+  opacity: 1;
+  transform: none;
+}
+
+.bwn-title {
+  font: 400 clamp(34px, 11vw, 76px)/1 var(--display);
+  letter-spacing: 4px;
+  color: #b4ff1e;
+  text-shadow: 0 0 26px rgba(180, 255, 30, 0.7), 0 4px 0 #000;
+}
+
+.bwn-sub {
+  font: 400 clamp(18px, 5vw, 28px)/1 var(--display);
+  letter-spacing: 5px;
+  color: #fff;
+  text-shadow: 0 2px 8px #000;
+}
+
+.bwn-name {
+  font: 800 12px/1 var(--mono);
+  letter-spacing: 2px;
+  color: var(--bc);
+  text-decoration: line-through;
+  text-shadow: 0 2px 6px #000;
+}
+
+.bwn-rew {
+  margin-top: 4px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  font: 800 12px/1.2 var(--mono);
+  color: #ffd23a;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(255, 210, 58, 0.5);
+}

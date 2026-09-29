@@ -79,6 +79,7 @@ Tests (need `npx playwright install chromium` once, and the dev server running):
 npm run test:play       # fairness solver (40 seeds x 9 km) + keyboard/touch controls
 npm run test:scenarios  # 15 scripted checks: dodge/jump/slide, near misses, damage, power-ups, boss, crash
 npm run test:progression # saves, migration, levels, coin bank, missions, set payout -> multiplier
+npm run test:boss        # all four bosses end to end (autopilot), death mid-fight + restart
 npm run test:shop        # buying, level locks, outfits, trails, upgrades, boosts, shop/profile screens, saves
 npm run test:bot        # lockstep autopilot across 24 seeds, prints balance stats
 npm run test:shots      # screenshots of key moments into shots/
@@ -102,7 +103,13 @@ npm run build:single -- out.html "label"   # one self-contained HTML file (fonts
 - **DEBUG COMBO** multiplier tiers: x1 → x2 (5) → x3 (12) → x5 (25) → x10 (45). A hit or 3.4 s idle breaks the chain.
 - **Power-ups:** DEBUG MODE (invincible, auto-fixes bugs), FIREWALL (absorbs one hit), CODE BOOST (overclocked + invincible), BUG MAGNET, RAM BOOST (×2 score, faster moves), ADMIN ACCESS (rare: deletes everything ahead, ×3 score).
 - **Corruption stages:** Clean Computer → Minor Bugs → System Errors → Corrupted System → Virus Infection → Critical System Failure → THE CORE.
-- **THE VIRUS** (boss, from 1,350 m): survive its dropped packets and grab gold security patches until PATCHING SYSTEM hits 100% → VIRUS DELETED ✓.
+- **Boss fights** (`src/boss/`): MALWARE BEAST (1,050 m), FIREWALL (2,550 m), CODE BREAKER (3,450 m) and the final
+  boss SYSTEM CRASH (4,450 m), then tougher MK II versions every 1,500 m. Each encounter runs
+  WARNING → cinematic INTRO (slow motion, camera shots, title card) → FIGHT → DEFEATED → VICTORY cinematic
+  (explosions, THREAT ELIMINATED) → NEXT LEVEL (the next area opens). You fight with the normal controls: every
+  attack is telegraphed on the floor (red = change lane, gold = jump, cyan = slide). Gold patches hit the boss;
+  getting through a whole attack without a hit (PERFECT DODGE) chips it too. Bosses have 3 phases (the final has
+  4) and get faster and meaner as their health bar drops. Distances count running outside boss fights.
 
 ## Progression
 
@@ -146,7 +153,9 @@ src/
   core/    GameManager (state machine + loop), Config (all tuning), Theme (stages + shared shader palette),
            EventBus, GameState, Profile (saved progress: level, bank, best, missions, stats)
   game/    PlayerController, Character (procedural rig), CameraController, ComboSystem,
-           ObstacleWatcher (clears / near misses), PowerUps, VirusBoss, Missions, Shop
+           ObstacleWatcher (clears / near misses), PowerUps, Missions, Shop
+  boss/    BossDirector (encounter state machine, attacks, cinematics), bosses (catalogue: stats, phases,
+           attack patterns), BossModel + models/ (the four bosses), LaneWarnings (floor telegraphs)
   world/   Track (data streams + motherboard), ComputerWorld (instanced districts, holo windows, core),
            Obstacles (hazards + bad bugs), Pickups (collectibles, good bugs, power-ups), Spawner (fair generation)
   render/  Quality (tiers), MaterialLib (procedural PBR), Environment (PMREM), Reflection (planar mirror),

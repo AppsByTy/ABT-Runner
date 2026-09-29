@@ -17,6 +17,12 @@ export class CameraController {
   private deathBlend = 0;
   /** 1 = close-up menu framing on the character, 0 = chase camera. */
   private menuBlend = 1;
+  /**
+   * Cinematic shot (boss intros / victories): where to put the camera, what to
+   * look at, and how much of it to use (0 = normal camera, 1 = the shot).
+   */
+  readonly shot = { w: 0, pos: new THREE.Vector3(), look: new THREE.Vector3(), fov: 55 };
+  private readonly lookV = new THREE.Vector3();
   /** Shop open: frame the runner in the free screen area above the shop sheet. */
   shopView = false;
   /** Free area for the runner while shopping, as fractions of the screen height (top, bottom). */
@@ -179,7 +185,18 @@ export class CameraController {
     const ox = s * 0.22 * (Math.sin(t * 1.3) * 0.7 + Math.sin(t * 2.9) * 0.3);
     const oy = s * 0.18 * (Math.sin(t * 1.7 + 1.1) * 0.7 + Math.sin(t * 3.3) * 0.3);
     this.camera.position.set(this.pos.x + ox, this.pos.y + oy + this.dipY, this.pos.z);
-    this.camera.lookAt(this.look.x + ox * 0.5, this.look.y + oy * 0.5 + this.dipY * 0.6, this.look.z);
-    this.camera.rotation.z += s * 0.035 * Math.sin(t * 0.9) + this.roll;
+    this.lookV.set(this.look.x + ox * 0.5, this.look.y + oy * 0.5 + this.dipY * 0.6, this.look.z);
+    const w = this.shot.w;
+    if (w > 0.001) {
+      const e = w * w * (3 - 2 * w);
+      this.camera.position.lerp(this.shot.pos, e);
+      this.camera.position.x += ox * e;
+      this.camera.position.y += oy * e;
+      this.lookV.lerp(this.shot.look, e);
+      this.camera.fov += (this.shot.fov - this.camera.fov) * e;
+      this.camera.updateProjectionMatrix();
+    }
+    this.camera.lookAt(this.lookV);
+    this.camera.rotation.z += s * 0.035 * Math.sin(t * 0.9) + this.roll * (1 - w);
   }
 }

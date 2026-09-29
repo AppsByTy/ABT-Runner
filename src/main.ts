@@ -2,6 +2,7 @@ import './style.css';
 import './ui/premium.css';
 import './ui/progression.css';
 import './ui/shop.css';
+import './ui/boss.css';
 import { GameManager } from './core/GameManager';
 import { events } from './core/EventBus';
 import { audio } from './audio/AudioManager';

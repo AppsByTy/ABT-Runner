@@ -10,7 +10,8 @@ import { CameraController } from '../game/CameraController';
 import { ComboSystem } from '../game/ComboSystem';
 import { ObstacleWatcher } from '../game/ObstacleWatcher';
 import { PowerUps } from '../game/PowerUps';
-import { VirusBoss } from '../game/VirusBoss';
+import { BossDirector } from '../boss/BossDirector';
+import type { BossDef } from '../boss/bosses';
 import { Missions } from '../game/Missions';
 import { Shop } from '../game/Shop';
 import { Track } from '../world/Track';
@@ -43,6 +44,8 @@ const CAUSE: Record<ObstacleKind, string> = {
   virusDrone: 'VIRUS_PAYLOAD_EXECUTED',
   malwareBug: 'MALWARE_BREACH',
   packet: 'CORRUPT_PACKET_OVERFLOW',
+  laser: 'LASER_SCAN_OVERLOAD',
+  shock: 'SHOCKWAVE_KERNEL_FAULT',
 };
 
 const POWER_BANNER: Record<PowerType, [string, string, 'green' | 'orange' | 'cyan' | 'pink' | 'purple' | 'gold']> = {
@@ -84,7 +87,8 @@ export class GameManager {
   readonly obstacles: ObstacleManager;
   readonly pickups: PickupManager;
   readonly spawner: Spawner;
-  readonly boss: VirusBoss;
+  /** Boss encounters (warning, intro, fight, victory) layered on the run. */
+  readonly boss: BossDirector;
   readonly powers = new PowerUps();
   readonly combo = new ComboSystem();
   readonly watcher = new ObstacleWatcher();
@@ -255,7 +259,21 @@ export class GameManager {
     this.obstacles.onMaterialize = (o) => events.emit('materialize', { x: o.x, z: -(o.dist - this.distance), kind: o.kind });
     this.pickups = new PickupManager(this.scene);
     this.spawner = new Spawner(this.obstacles, this.pickups, { health: () => this.health });
-    this.boss = new VirusBoss(this.scene);
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
+    const gm = this;
+    this.boss = new BossDirector(this.scene, this.lib, {
+      get obstacles() { return gm.obstacles; },
+      get pickups() { return gm.pickups; },
+      get spawner() { return gm.spawner; },
+      get player() { return gm.player; },
+      get hud() { return gm.hud; },
+      get cam() { return gm.cam; },
+      get post() { return gm.post; },
+      distance: () => gm.distance,
+      speed: () => gm.speed,
+      hits: () => gm.hits,
+      reward: (def, index, cycle) => gm.bossReward(def, index, cycle),
+    });
     this.scene.add(this.player.root, this.player.shadowRoot);
     this.post = new PostFX(this.renderer, this.scene, this.cam.camera, q);
     this.fx = new FXDirector(this.scene, this.player, this.cam, this.post, this.boss, q.particles);
@@ -403,35 +421,10 @@ export class GameManager {
       }
     });
 
-    events.on('bossStart', () => {
-      this.hud.banner('VIRUS DETECTED', 'COLLECT GOLD PATCHES TO DELETE IT', 'red', 2.6);
-      audio.play('bossAlarm');
-      audio.setBoss(true);
-    });
-    events.on('bossActive', () => this.spawner.setBoss(true, this.distance));
-    events.on('bossPatched', ({ progress, needed }) => {
-      this.hud.popup(`PATCH ${progress}/${needed}`, 'gold', true);
-      audio.play('bossPatch', progress * 2);
-    });
-    events.on('bossDeleted', () => {
-      const S = CONFIG.score;
-      const reward = S.boss * this.totalMult;
-      this.addScore(S.boss);
-      this.coinCount += 50;
-      this.xp += CONFIG.xp.boss;
-      this.heal(CONFIG.health.boss);
-      this.combo.add(3, 'VIRUS DELETED');
-      this.hud.banner('VIRUS DELETED ✓', `+${reward.toLocaleString('en-US')} · +50 COINS · +${CONFIG.xp.boss} XP`, 'green', 2.6);
-      audio.play('bossDeleted');
-      this.spawner.setBoss(false, this.distance);
-    });
-    events.on('bossEscaped', () => {
-      this.hud.banner('VIRUS ESCAPED', 'QUARANTINE FAILED · IT WILL BE BACK', 'red', 2.2);
-      this.spawner.setBoss(false, this.distance);
-    });
-    events.on('bossEnd', () => {
-      audio.setBoss(false);
-      this.hud.boss(false);
+    events.on('bossStart', () => this.combo.keepAlive(8));
+    events.on('bossHit', ({ dmg, kind }) => {
+      if (kind === 'patch') this.hud.popup(`PATCH HIT · -${dmg} HP`, 'gold', true);
+      this.combo.add(1, 'BOSS HIT');
     });
 
     events.on('missionComplete', ({ text, xp }) => {
@@ -670,6 +663,7 @@ export class GameManager {
         return;
       case GameState.Playing:
         this.actions++;
+        if (this.boss.inputLocked && a !== 'pause') return;
         if (a === 'left') this.player.moveLane(-1);
         else if (a === 'right') this.player.moveLane(1);
         else if (a === 'jump') this.player.jump();
@@ -745,6 +739,9 @@ export class GameManager {
       // Brief slow-mo on the crash, then settle.
       this.timeScale = this.stateTime < 0.4 ? 0.22 : Math.min(1, this.timeScale + realDt * 3);
       if (this.stateTime > 1.3) this.finishRun();
+    } else if (playing) {
+      // Boss cinematics run the world in slow motion.
+      this.timeScale = this.boss.timeScale;
     }
     const dt = realDt * this.timeScale;
 
@@ -808,10 +805,10 @@ export class GameManager {
     const hype = playing ? (tier >= 10 ? 0.8 : tier >= 5 ? 0.45 : tier >= 3 ? 0.2 : 0) : 0;
     this.post.hype += (hype - this.post.hype) * Math.min(1, realDt * 3);
     this.post.hypeColor.set(tier >= 10 ? '#ffd23a' : tier >= 5 ? '#ff2bd6' : '#b4ff1e');
-    audio.setIntensity(this.state === GameState.Ready ? 0 : this.boss.fighting || tier >= 5 || mode === 'admin' ? 3 : tier >= 3 ? 2 : 1);
+    audio.setIntensity(this.state === GameState.Ready ? 0 : this.boss.active || tier >= 5 || mode === 'admin' ? 3 : tier >= 3 ? 2 : 1);
 
     this.hud.update(this.stats(), realDt);
-    if ((playing || this.state === GameState.Paused) && (this.boss.phase === 'active' || this.boss.phase === 'deleted')) this.hud.boss(true, this.boss.progress, this.boss.needed, this.boss.timeLeft);
+    if (playing || dying) this.boss.animate(realDt, playing);
 
     // Cinematic lens: radial motion blur at speed / boosts, shallow DOF on menus.
     const boosting = mode === 'boost' || mode === 'admin';
@@ -880,11 +877,12 @@ export class GameManager {
     this.spawner.update(this.distance, this.speed, sf, dt);
     this.track.update(this.distance);
     this.obstacles.update(this.distance, dt, this.clock);
-    this.boss.update(dt, this.distance, this.player.x, this.player.lane);
+    this.boss.step(dt);
 
-    // Corruption stage progression.
-    const st = stageAt(this.distance);
-    if (st.id !== this.stage.id) {
+    // Corruption stage progression (areas): measured in running outside boss
+    // fights, and held while a boss is up - the next area opens as it falls.
+    const st = stageAt(this.boss.progress(this.distance));
+    if (st.id !== this.stage.id && !this.boss.blocksStages) {
       this.stage = st;
       events.emit('stage', { id: st.id, name: st.name });
       if (st.id === 7) this.hud.banner('ENTERING THE CORE', 'THE HEART OF THE SYSTEM', 'gold', 2.6);
@@ -971,7 +969,7 @@ export class GameManager {
       this.deleteObstacle(o, isBadBug(o.kind));
       return;
     }
-    if (p.invulnerable) {
+    if (p.invulnerable || this.boss.shielded) {
       this.grazed = o;
       return;
     }
@@ -1094,6 +1092,22 @@ export class GameManager {
     events.emit('death', { kind: o.kind, score: this.score, distance: this.distance });
   }
 
+  /** A boss is down: score, coins, XP and a heal, scaled by which boss it was. */
+  private bossReward(def: BossDef, index: number, cycle: number): string {
+    const S = CONFIG.score;
+    const k = 1 + index * 0.5 + cycle;
+    const pts = Math.round(S.boss * k);
+    const coins = Math.round(50 + 25 * index + 50 * cycle);
+    const xp = Math.round(CONFIG.xp.boss * k);
+    const reward = pts * this.totalMult;
+    this.addScore(pts);
+    this.coinCount += coins;
+    this.xp += xp;
+    this.heal(CONFIG.health.boss);
+    this.combo.add(3, `${def.name} DELETED`);
+    return `+${Math.round(reward).toLocaleString('en-US')} · +${coins} COINS · +${xp} XP`;
+  }
+
   private finishRun(): void {
     const report = this.commitRun();
     this.hud.showGameOver({
@@ -1159,6 +1173,13 @@ export class GameManager {
     this.hemi.intensity += (0.55 * st.ambient - this.hemi.intensity) * Math.min(1, dt * 2);
     this.key.intensity = 2.2 * (0.55 + 0.45 * st.ambient) + beat * 0.25;
     if (strobe > 0.01) this.rim.color.lerp(this.red, strobe);
+    // Boss mood: its colour floods the rim light, the world darkens (blue screen).
+    const bm = this.boss.mood;
+    if (bm.amount > 0.01) {
+      this.rim.color.lerp(bm.color, Math.min(1, bm.amount));
+      this.key.color.copy(this.white).lerp(bm.color, bm.amount * 0.35);
+    } else this.key.color.copy(this.white);
+    this.hemi.intensity *= 1 - bm.dark * 0.02;
     this.rim.intensity = 1.6 + strobe * 2.5 + beat * 0.4;
 
     // Short, rare glitch bursts only where the system is actually corrupted.

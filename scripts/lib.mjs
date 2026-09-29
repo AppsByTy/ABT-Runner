@@ -45,9 +45,11 @@ export const INSTALL_BOT = () => {
       const look = s * 1.25;
       const cur = threats(P.lane, -0.5, look);
       const tOf = (t) => (t ? t.t : Infinity);
+      // Boss fights: go for the gold patches when the lane is safe.
+      const patch = (l) => g.pickups.active.some((c) => c.kind === 'bossPatch' && !c.collected && c.lane === l && c.dist - g.distance > 0 && c.dist - g.distance < look * 1.4);
       const score = (l) => {
         const t = threats(l, -1.5, look);
-        return !t ? 100 : t.cls === 'wall' ? -50 + tOf(t) : 10 + tOf(t);
+        return !t ? 100 + (patch(l) ? 30 : 0) : t.cls === 'wall' ? -50 + tOf(t) : 10 + tOf(t);
       };
       const cross = (l, w) => !threats(l, -2.5, s * w);
       const committed = cur && cur.cls !== 'wall' && tOf(cur) < 0.45;
