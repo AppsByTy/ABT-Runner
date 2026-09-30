@@ -318,6 +318,13 @@ export class FXDirector {
       post.pulse(Math.min(1, 0.5 + power * 0.2));
       if (power >= 1.8) post.glitch(0.4 * power);
     });
+    events.on('bossJab', ({ x, y, z, n }) => {
+      // Each move of a combo: a quick bolt and a spray of sparks on the boss.
+      const col = n % 2 ? MAGENTA : CYAN;
+      this.beam(new THREE.Vector3(player.x, 1.2, 0), x, z, col, y);
+      p.burst(x, y, z, { count: 18, color: [col, '#ffffff', GOLD], speed: [4, 10], life: [0.25, 0.5], size: [0.18, 0.36], drag: 1.6, world: false, jitter: 1, shape: [Shape.Spark, Shape.Streak], spin: 6 });
+      post.pulse(0.3);
+    });
     events.on('bossPhase', ({ x, y, z }) => {
       p.burst(x, y, z, { count: 120, color: [RED, MAGENTA, '#ffffff'], speed: [6, 16], life: [0.6, 1.2], size: [0.2, 0.45], drag: 1, world: false, jitter: 4, shape: [Shape.Streak, Shape.Spark, Shape.Pixel], spin: 8 });
       this.ring(x, 0.05, z, RED, 12);

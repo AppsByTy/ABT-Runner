@@ -627,3 +627,15 @@
   transform: translate(-50%, 0);
   animation: bwBlink 0.6s steps(2) infinite;
 }
+
+/* Boss attacks mid-combo: sequence greys out, the call turns red. */
+.bseq.held .bs-steps,
+.bseq.held .bs-time {
+  opacity: 0.35;
+}
+
+.bseq.held .bs-title {
+  color: #ff2a4a;
+  text-shadow: 0 0 14px #ff2a4a, 0 2px 0 #000;
+  animation: bwBlink 0.4s steps(2) infinite;
+}

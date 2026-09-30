@@ -115,7 +115,10 @@ npm run build:single -- out.html "label"   # one self-contained HTML file (fonts
     `TAP · LEFT · TAP`). While it is up, swipes are attack inputs, not moves. Hit by the attack → OPENING (normal
     strike); dodged it cleanly → WEAK POINT (CRITICAL HIT); dodged a heavy attack → PERFECT DODGE → slow motion →
     COUNTER! Fast and clean = PERFECT! (bonus damage, slow-mo, flash). Wrong input or too slow = MISS: combo reset
-    and the boss attacks straight away.
+    and the boss attacks straight away. Every input is a move: tap = punch / front kick, ← → = spinning roundhouse,
+    ↑ = backflip, ↓ = breakdance sweep, last input = flying flip-kick finisher.
+  - *Mid-combo attacks:* the boss swings while you're comboing (more often each phase). The sequence pauses
+    (⚠ INCOMING · JUMP!), your swipes move you again, dodge it and the combo resumes; get hit and it's INTERRUPTED.
   - *Combo + special:* each strike raises the combo (more damage, more bolts) and fills the SPECIAL meter; when full,
     the next opening is a long sequence that unleashes a cinematic special attack.
   - *Phases:* 3 per boss (4 for SYSTEM CRASH). A hit can't skip a phase. Each phase shortens reaction time,

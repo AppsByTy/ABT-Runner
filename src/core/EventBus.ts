@@ -54,6 +54,8 @@ export interface GameEvents {
   bossImpact: At & { color: string };
   bossActive: undefined;
   bossHit: At & { dmg: number; hp: number; max: number; kind: BossHitKind; combo?: number; perfect?: boolean };
+  /** One input of a sequence landed (a light blow on the boss). */
+  bossJab: At & { n: number };
   /** A touch attack sequence resolved (ok) or failed. */
   bossSeq: { ok: boolean; kind: string; perfect: boolean; combo: number };
   bossPhase: At & { phase: number; label: string };

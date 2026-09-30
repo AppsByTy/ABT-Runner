@@ -48,7 +48,7 @@ export const INSTALL_BOT = () => {
     return (dt) => {
       cd -= dt;
       const sq = g.boss.seq;
-      if (sq && sq.state === 'live' && g.state === 'playing') {
+      if (sq && sq.state === 'live' && !sq.hold && g.state === 'playing') {
         if (sq !== seqRef) { seqRef = sq; fumble = Math.random() < skill.miss; }
         if (sq.t >= 0.3 + skill.react + sq.i * skill.step) {
           const gl = sq.steps[sq.i];

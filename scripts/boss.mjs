@@ -44,7 +44,7 @@ const campaign = (skill) => page.evaluate((skill) => {
     let frames = 0, maxHp = 0, maxCombo = 0, minHealth = 100;
     const tune = [];
     const per = {};
-    while (g.state === 'playing' && frames < 60 * 300) {
+    while (g.state === 'playing' && frames < 60 * 360) {
       frames++;
       const B = g.boss;
       if (B.state !== states[states.length - 1]) states.push(B.state);
@@ -82,6 +82,7 @@ check('3. touch sequences register', S('ok').every((n) => n >= 4), `ok ${S('ok')
 check('6. combos build (x3+ in every fight)', good.out.every((o) => o.maxCombo >= 3), good.out.map((o) => o.maxCombo).join(','));
 check('7. phase transitions (3 phases, 4 for the final boss)', /bossPhase1/.test(good.log) && /bossPhase2/.test(good.log) && /bossPhase3/.test(good.log), good.log.match(/bossPhase\d/g)?.join(' '));
 check('8. special attacks fire', sum('special') >= 2 && good.kinds.special >= 2, `specials ${S('special')}`);
+check('boss attacks mid-combo and dodging them keeps the combo', sum('interrupts') >= 8 && sum('interruptsDodged') >= 6, `interrupts ${S('interrupts')} dodged ${S('interruptsDodged')}`);
 check('PERFECT attacks happen', sum('perfect') > 0, `perfect ${S('perfect')}`);
 const harder = good.out.every((o) => {
   const t = o.tune.filter(Boolean), a = t[0], z = t[t.length - 1];
@@ -114,6 +115,7 @@ const t = await page.evaluate(() => {
   // 5. Enter the sequence correctly: the boss takes damage and the combo rises.
   const ACT = { T: 'confirm', L: 'left', R: 'right', U: 'jump', D: 'slide' };
   const seqEvents = []; const off = ev.on('bossSeq', (e) => seqEvents.push(e));
+  B.seq.interruptAt = -1;
   step(25); // past the grace
   const hp0 = B.hp, lane0 = g.player.lane;
   for (const s of [...B.seq.steps]) { g.input.trigger(ACT[s]); step(6); }
@@ -121,9 +123,11 @@ const t = await page.evaluate(() => {
   res.dmg = hp0 - B.hp;
   res.combo = B.combo;
   res.laneUnmoved = g.player.lane === lane0; // swipes went to the attack, not the runner
+  res.trick = g.player.character.tricking; // the runner is mid-move (finisher)
   // 4. Next opening: a wrong input -> MISS, combo reset, no damage, boss attacks at once.
   g.health = 100;
   until(() => B.seq && B.seq.t > 0.35, 60 * 25);
+  B.seq.interruptAt = -1;
   const hp1 = B.hp;
   const wrong = { T: 'left', L: 'right', R: 'left', U: 'slide', D: 'jump' };
   g.input.trigger(wrong[B.seq.steps[0]]);
@@ -138,7 +142,20 @@ const t = await page.evaluate(() => {
   const n0 = seqEvents.length;
   until(() => seqEvents.length > n0, 60 * 8);
   res.timeoutFails = seqEvents[seqEvents.length - 1]?.ok === false;
-  off();
+  // Mid-combo attack, not dodged: the combo is broken.
+  g.health = 100;
+  let tries = 0;
+  do { until(() => B.seq && B.seq.t > 0.35, 60 * 25); tries++; } while (B.seq && B.seq.interruptAt < 0 && tries < 12 && (until(() => !B.seq, 60 * 10), true));
+  res.interruptPlanned = B.seq?.interruptAt;
+  if (B.seq && B.seq.interruptAt >= 0) {
+    const n1 = seqEvents.length;
+    for (let k = 0; k <= B.seq.interruptAt; k++) { g.input.trigger(ACT[B.seq.steps[B.seq.i]]); step(6); }
+    res.held = B.seq?.hold;
+    res.holdMoves = (() => { const l = g.player.lane; g.input.trigger(l === 0 ? 'right' : 'left'); step(12); const moved = g.player.lane !== l; g.input.trigger(l === 0 ? 'left' : 'right'); step(12); return moved; })();
+    until(() => seqEvents.length > n1, 60 * 8);
+    const ev1 = seqEvents[seqEvents.length - 1];
+    res.interruptHitBreaks = ev1?.ok === false && B.stats.interrupts > 0;
+  }
   // Reversed controls (mirror attacks) swap lanes.
   until(() => !B.seq && !B.attack, 60 * 3);
   B.reversed = true;
@@ -159,6 +176,8 @@ check('1. boss attacks hit a runner who does not dodge', t.hitsStandingStill > 0
 check('5. a completed sequence damages the boss', t.okEvent === true && t.dmg > 0 && t.combo === 1 && t.laneUnmoved, `-${t.dmg} hp, combo ${t.combo}, lane kept ${t.laneUnmoved}`);
 check('4. a failed sequence: MISS, combo reset, no damage, boss strikes back', t.failEvent && t.comboAfterFail === 0 && t.hpAfterFail === 0 && t.punishDelay < 1, `punish after ${t.punishDelay}s`);
 check('too slow also fails', t.timeoutFails);
+check('runner performs fight moves', !!t.trick, t.trick);
+check('boss swings mid-combo: sequence pauses, moves work, getting hit breaks the combo', t.held === true && t.holdMoves && t.interruptHitBreaks, `planned ${t.interruptPlanned} held ${t.held} moves ${t.holdMoves} breaks ${t.interruptHitBreaks}`);
 check('mirror attack reverses controls', t.reversedMoves);
 check('decoys are harmless', t.decoyHarmless);
 

@@ -46,7 +46,11 @@ export class Sequence {
   /** Real seconds since opening (includes grace). */
   t = 0;
   state: 'live' | 'done' | 'fail' = 'live';
-  failReason: 'wrong' | 'slow' | '' = '';
+  failReason: 'wrong' | 'slow' | 'hit' | '' = '';
+  /** Paused while the boss attacks mid-combo: inputs go back to dodging. */
+  hold = false;
+  /** After this many correct inputs the boss interrupts (-1 = never). */
+  interruptAt = -1;
   private lastOk = -1;
 
   constructor(steps: string, kind: SeqKind, perStep: number, part = 1, parts = 1) {
@@ -73,7 +77,7 @@ export class Sequence {
   }
 
   input(g: Glyph): SeqResult {
-    if (this.state !== 'live') return 'ignored';
+    if (this.state !== 'live' || this.hold) return 'ignored';
     if (this.t < SEQ_GRACE) return 'ignored';
     if (g === this.steps[this.i]) {
       this.i++;
@@ -92,7 +96,7 @@ export class Sequence {
 
   /** Advance real time; true when it just ran out. */
   tick(dt: number): boolean {
-    if (this.state !== 'live') return false;
+    if (this.state !== 'live' || this.hold) return false;
     this.t += dt;
     if (this.used >= this.window) {
       this.state = 'fail';
@@ -105,3 +109,6 @@ export class Sequence {
 
 /** Combo damage multiplier: x1 .. x5 and beyond. */
 export const comboMult = (combo: number): number => 1 + Math.min(5, Math.max(0, combo - 1)) * 0.14;
+
+/** The move the runner performs for each input. */
+export const TRICK_OF: Record<Glyph, 'punch' | 'kick' | 'spinL' | 'spinR' | 'flip' | 'sweep'> = { T: 'punch', L: 'spinL', R: 'spinR', U: 'flip', D: 'sweep' };

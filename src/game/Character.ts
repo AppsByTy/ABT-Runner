@@ -29,6 +29,13 @@ export interface AnimInput {
   idle: boolean;
 }
 
+/** Fight moves (boss combat). Purely visual: the hitbox never moves. */
+export type Trick = 'punch' | 'kick' | 'spinL' | 'spinR' | 'flip' | 'sweep' | 'finisher';
+const TRICK_DUR: Record<Trick, number> = { punch: 0.3, kick: 0.4, spinL: 0.5, spinR: 0.5, flip: 0.62, sweep: 0.5, finisher: 0.85 };
+/** Height of the flip/spin pivot (about the hips). */
+const PIVOT = 0.95;
+const ease = (u: number): number => (u < 0.5 ? 2 * u * u : 1 - (-2 * u + 2) ** 2 / 2);
+
 type JointName =
   | 'hips' | 'spine' | 'chest' | 'neck' | 'head'
   | 'thighL' | 'thighR' | 'kneeL' | 'kneeR' | 'footL' | 'footR'
@@ -229,6 +236,13 @@ export class Character {
   readonly root = new THREE.Group();
   private readonly yaw = new THREE.Group();
   private readonly body = new THREE.Group();
+  /** Trick pivot (flips and spins turn about the hips) and its counter-offset. */
+  private readonly trickG = new THREE.Group();
+  private readonly trickIn = new THREE.Group();
+  private trickKind: Trick | null = null;
+  private trickT = 0;
+  private trickDur = 1;
+  private trickSide = 1;
   private readonly j = {} as Record<JointName, THREE.Group>;
   private readonly laptop = new THREE.Group();
   private readonly laptopLid = new THREE.Group();
@@ -356,7 +370,11 @@ export class Character {
     };
 
     this.root.add(this.yaw);
-    this.yaw.add(this.body);
+    this.yaw.add(this.trickG);
+    this.trickG.position.y = PIVOT;
+    this.trickIn.position.y = -PIVOT;
+    this.trickG.add(this.trickIn);
+    this.trickIn.add(this.body);
 
     // ------------------------------------------------------------ pelvis & legs
     const hips = joint('hips', this.body, 0, 0.99, 0);
@@ -554,6 +572,9 @@ export class Character {
     this.turn = 1;
     this.laptopT = 1;
     this.reactT = 0;
+    this.trickKind = null;
+    this.trickG.rotation.set(0, 0, 0);
+    this.trickG.position.set(0, PIVOT, 0);
     this.w = { run: 0, air: 0, slide: 0, idle: 1 };
     this.body.position.set(0, 0, 0);
     this.body.rotation.set(0, 0, 0);
@@ -563,6 +584,23 @@ export class Character {
     this.laptopLid.rotation.x = LID_OPEN;
     for (const n of JOINTS) this.j[n].rotation.set(0, 0, 0);
     for (const s of Object.values(this.springs)) s.x = s.v = 0;
+  }
+
+  /** Play a fight move (punch / kicks / spins / flips). */
+  trick(kind: Trick, dur?: number): void {
+    this.trickKind = kind;
+    this.trickT = 0;
+    this.trickDur = dur ?? TRICK_DUR[kind];
+    if (kind === 'punch' || kind === 'kick') this.trickSide = -this.trickSide;
+  }
+
+  /** Stop a move at once (the player needs to dodge). */
+  cancelTrick(): void {
+    this.trickKind = null;
+  }
+
+  get tricking(): Trick | null {
+    return this.trickKind;
   }
 
   land(): void {
@@ -633,8 +671,19 @@ export class Character {
       v.z += z * wgt;
     };
 
+    // ---- fight move: weight fades the run out while it plays
+    let wt = 0;
+    let u = 0;
+    if (this.trickKind) {
+      this.trickT += dt / this.trickDur;
+      if (this.trickT >= 1) this.trickKind = null;
+      else {
+        u = this.trickT;
+        wt = Math.min(1, u / 0.12, (1 - u) / 0.15);
+      }
+    }
     // ---- run: pelvis yaw, counter-rotating chest, pumping arms, foot roll
-    const wr = this.w.run;
+    const wr = this.w.run * (1 - wt);
     // With the 3D model the run comes from its own motion clip.
     if (wr > 0.001 && !this.avatar) {
       const p = this.phase;
@@ -717,6 +766,12 @@ export class Character {
       bodyY += br * 0.008 * wi;
     }
 
+    if (wt > 0) this.poseTrick(this.trickKind!, u, wt, add);
+    else {
+      this.trickG.rotation.set(0, 0, 0);
+      this.trickG.position.set(0, PIVOT, 0);
+    }
+
     // ---- stumble jerk
     if (a.stumble > 0) {
       const st = a.stumble;
@@ -767,7 +822,93 @@ export class Character {
     this.body.position.z += (0 - this.body.position.z) * damp(10, dt);
 
     this.secondary(a, dt);
-    this.avatar?.update(this.j, this.w.run, this.phase);
+    this.avatar?.update(this.j, this.w.run * (1 - wt), this.phase);
+  }
+
+  /** Joint targets + whole-body flips/spins for a fight move at progress u. */
+  private poseTrick(k: Trick, u: number, w: number, add: (n: JointName, x: number, y: number, z: number, wgt: number) => void): void {
+    const G = this.trickG;
+    const e = Math.sin(Math.PI * u);
+    const sd = this.trickSide;
+    let lift = 0;
+    G.rotation.set(0, 0, 0);
+    // Strike peak: fast out, hold, return.
+    const hit = Math.min(1, u / 0.3) * Math.min(1, (1 - u) / 0.35);
+    const arm = sd > 0 ? 'R' : 'L';
+    const leg = sd > 0 ? 'R' : 'L';
+    switch (k) {
+      case 'punch':
+        add('chest', 0, sd * 0.55 * hit, 0, w);
+        add('spine', 0.1, sd * 0.2 * hit, 0, w);
+        add(`shoulder${arm}`, 1.55 * hit, 0, 0, w);
+        add(`elbow${arm}`, 0.1, 0, 0, w);
+        add(`shoulder${arm === 'R' ? 'L' : 'R'}`, 0.6, 0, 0, w);
+        add(`elbow${arm === 'R' ? 'L' : 'R'}`, 1.8, 0, 0, w);
+        add(`thigh${leg === 'R' ? 'L' : 'R'}`, 0.4, 0, 0, w);
+        add(`knee${leg === 'R' ? 'L' : 'R'}`, -0.5, 0, 0, w);
+        break;
+      case 'kick':
+        lift = 0.18 * e;
+        add('spine', -0.35 * hit, 0, 0, w);
+        add(`thigh${leg}`, 1.75 * hit, 0, 0, w);
+        add(`knee${leg}`, -0.15 - 1.2 * (1 - hit), 0, 0, w);
+        add(`foot${leg}`, -0.4, 0, 0, w);
+        add(`knee${leg === 'R' ? 'L' : 'R'}`, -0.3, 0, 0, w);
+        add('shoulderL', 0.3, 0, -0.9 * hit, w);
+        add('shoulderR', 0.3, 0, 0.9 * hit, w);
+        add('elbowL', 1.2, 0, 0, w);
+        add('elbowR', 1.2, 0, 0, w);
+        break;
+      case 'spinL':
+      case 'spinR': {
+        // Spinning roundhouse: a full turn with the leg out.
+        const dir = k === 'spinL' ? 1 : -1;
+        lift = 0.45 * e;
+        G.rotation.y = dir * Math.PI * 2 * ease(u);
+        const l = k === 'spinL' ? 'R' : 'L';
+        add(`thigh${l}`, 0.9 * e, 0, (l === 'R' ? -1 : 1) * 1.2 * e, w);
+        add(`knee${l}`, -0.1, 0, 0, w);
+        add(`knee${l === 'R' ? 'L' : 'R'}`, -1.2 * e, 0, 0, w);
+        add(`thigh${l === 'R' ? 'L' : 'R'}`, 0.6 * e, 0, 0, w);
+        add('shoulderL', 0, 0, -1.3 * e, w);
+        add('shoulderR', 0, 0, 1.3 * e, w);
+        add('spine', 0, 0, dir * 0.3 * e, w);
+        break;
+      }
+      case 'flip':
+      case 'finisher': {
+        // Backflip; the finisher is higher and snaps out a flying kick at the top.
+        const big = k === 'finisher';
+        lift = (big ? 2.1 : 1.35) * e;
+        G.rotation.x = Math.PI * 2 * ease(Math.min(1, u * 1.1));
+        const tuck = Math.sin(Math.PI * Math.min(1, u * 1.25));
+        const kickOut = big ? Math.max(0, Math.sin(Math.PI * (u - 0.45) / 0.35)) * (u > 0.45 && u < 0.8 ? 1 : 0) : 0;
+        add('thighL', 1.5 * tuck, 0, 0, w);
+        add('thighR', 1.5 * tuck * (1 - kickOut) + 1.8 * kickOut, 0, 0, w);
+        add('kneeL', -2.0 * tuck, 0, 0, w);
+        add('kneeR', -2.0 * tuck * (1 - kickOut), 0, 0, w);
+        add('spine', 0.4 * tuck, 0, 0, w);
+        add('head', 0.3 * tuck, 0, 0, w);
+        add('shoulderL', 0.9 * tuck, 0, -0.5, w);
+        add('shoulderR', 0.9 * tuck, 0, 0.5, w);
+        add('elbowL', 1.3, 0, 0, w);
+        add('elbowR', 1.3, 0, 0, w);
+        break;
+      }
+      case 'sweep':
+        // Low breakdance sweep: drop, spin, one leg straight out.
+        lift = -0.45 * e;
+        G.rotation.y = Math.PI * 2 * ease(u) * -sd;
+        add('thighL', 0.2, 0, 1.3 * e, w);
+        add('kneeL', -0.05, 0, 0, w);
+        add('thighR', 1.2 * e, 0, 0, w);
+        add('kneeR', -2.2 * e, 0, 0, w);
+        add('spine', 0.5 * e, 0, 0, w);
+        add('shoulderR', 0.8, 0, 0.9 * e, w);
+        add('shoulderL', 0.8, 0, -0.9 * e, w);
+        break;
+    }
+    G.position.y = PIVOT + lift * w;
   }
 
   /** Spring-driven cloth and hair: they lag and bounce with body motion. */

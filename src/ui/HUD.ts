@@ -638,6 +638,7 @@ export class HUD {
   /** Show an attack sequence (T tap, L/R/U/D swipes), or hide it. */
   combatSeq(cfg: { title: string; steps: string[]; kind: string } | null): void {
     const el = this.$('h-bseq');
+    delete el.dataset.title;
     if (cfg) {
       this.$('h-bstitle').textContent = cfg.title;
       const chips = this.$('h-bssteps').children;
@@ -667,6 +668,20 @@ export class HUD {
     }
     (chips[i - 1] as HTMLElement | undefined)?.classList.add('on');
     if (state === 'done') this.$('h-bseq').classList.add('done');
+  }
+
+  /** Boss attacks mid-combo: the sequence greys out behind a DODGE call (null = resume). */
+  combatHold(text: string | null): void {
+    const el = this.$('h-bseq');
+    const t = this.$('h-bstitle');
+    if (text) {
+      el.dataset.title = t.textContent ?? '';
+      t.textContent = text;
+    } else if (el.dataset.title !== undefined) {
+      t.textContent = el.dataset.title;
+      delete el.dataset.title;
+    }
+    el.classList.toggle('held', !!text);
   }
 
   /** Time left in the window, 0..1 (transform only). */

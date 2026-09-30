@@ -15,7 +15,7 @@ import type { PickupManager } from '../world/Pickups';
 import type { Spawner } from '../world/Spawner';
 import type { BossModel, BossMode } from './BossModel';
 import { BOSSES, BOSS_AT, BOSS_REPEAT, type AttackDef, type BossDef, type Row } from './bosses';
-import { comboMult, GLYPH_OF, Sequence, SEQ_GRACE, SEQ_LABEL, SEQ_MULT, type SeqKind } from './Combat';
+import { comboMult, GLYPH_OF, Sequence, SEQ_GRACE, SEQ_LABEL, SEQ_MULT, TRICK_OF, type SeqKind } from './Combat';
 import { LaneWarnings, type WarnKind } from './LaneWarnings';
 
 /**
@@ -88,12 +88,14 @@ interface LiveAttack {
   end: number;
   hitsAtStart: number;
   judged: boolean;
+  /** Mid-combo attack: the sequence waits for it. */
+  interrupt?: boolean;
 }
 
 const WARN_FOR = { low: 'jump', high: 'slide', wall: 'move' } as const;
 const PATCH_DMG = 12;
 /** Base strike damage as a share of the boss's health. */
-const STRIKE = 0.036;
+const STRIKE = 0.044;
 type CineKind = 'counter' | 'special' | 'rage' | 'low' | '';
 
 export class BossDirector {
@@ -123,7 +125,7 @@ export class BossDirector {
   /** Left/right swapped (mirror attacks). */
   reversed = false;
   /** Per-fight numbers (tests and tuning). */
-  readonly stats = { attacks: 0, dodges: 0, ok: 0, fail: 0, slow: 0, perfect: 0, crit: 0, counter: 0, special: 0, hitsTaken: 0 };
+  readonly stats = { attacks: 0, dodges: 0, ok: 0, fail: 0, slow: 0, interrupts: 0, interruptsDodged: 0, perfect: 0, crit: 0, counter: 0, special: 0, hitsTaken: 0 };
 
   private readonly host: BossHost;
   private readonly models: BossModel[];
@@ -482,7 +484,8 @@ export class BossDirector {
   private fight(dt: number): void {
     this.shift = Math.max(0, this.shift - dt);
     // The boss holds while it is open to a strike or a cinematic plays.
-    if (this.seq || this.cineT > 0 || this.nextPart || this.seqHideT > 0) return;
+    if (this.cineT > 0 || this.nextPart || this.seqHideT > 0) return;
+    if (this.seq && !this.attack) return;
     const a = this.attack;
     if (a) {
       a.t += dt;
@@ -493,7 +496,8 @@ export class BossDirector {
       if (!a.judged && a.t > a.clearAt) {
         a.judged = true;
         this.attack = null;
-        this.judge(a);
+        if (a.interrupt) this.endInterrupt(a);
+        else this.judge(a);
       }
       return;
     }
@@ -652,6 +656,9 @@ export class BossDirector {
     const steps = kind === 'special' ? c.special : this.rng.pick(pool);
     const perStep = Math.max(0.36, c.perStep - this.phase * 0.06 - this.cycle * 0.03) * (kind === 'special' ? 1.1 : 1);
     this.seq = new Sequence(steps, kind, perStep, part, parts);
+    // The boss doesn't just stand there: it swings mid-combo (more often each phase).
+    const chance = [0.45, 0.7, 0.9, 1][Math.min(3, this.phase)];
+    if (this.seq.steps.length >= 3 && this.rng.chance(chance)) this.seq.interruptAt = this.rng.int(1, this.seq.steps.length - 2);
     const title = parts > 1 ? `${kind === 'opening' ? 'OPENING' : 'WEAK POINT'} ${part}/${parts}` : SEQ_LABEL[kind];
     this.host.hud.combatSeq({ title, steps: this.seq.steps, kind });
     this.host.hud.combatCue(null);
@@ -668,6 +675,11 @@ export class BossDirector {
   /** Taps and swipes go to the sequence while one is open. */
   combatInput(a: InputAction): boolean {
     if (this.state !== 'fight' || !this.seq || a === 'pause') return false;
+    if (this.seq.hold) {
+      // Dodging: moves work again (a stray tap does nothing).
+      if (a !== 'confirm') this.host.player.character.cancelTrick();
+      return a === 'confirm';
+    }
     const g = GLYPH_OF[a];
     if (!g) return true;
     const s = this.seq;
@@ -680,8 +692,89 @@ export class BossDirector {
     }
     this.host.hud.combatStep(s.i, r);
     audio.play('seqTick', s.i * 2);
-    if (r === 'done') this.resolveSeq(true);
+    const ch = this.host.player.character;
+    if (r === 'done') {
+      ch.trick('finisher', s.kind === 'special' ? 1.1 : 0.85);
+      this.resolveSeq(true);
+      return true;
+    }
+    ch.trick(g === 'T' && s.i % 2 === 0 ? 'kick' : TRICK_OF[g]);
+    // Each move lands a light blow.
+    const c = this.mouth;
+    events.emit('bossJab', { x: c.x + (Math.random() - 0.5) * 2, y: c.y + (Math.random() - 0.5) * 2, z: c.z + 1, n: s.i });
+    audio.play('bossHit', 4 + s.i);
+    this.hurt = 1;
+    this.host.cam.shake(0.12);
+    if (s.i === s.interruptAt) this.startInterrupt();
     return true;
+  }
+
+  /** The boss swings in the middle of your combo: dodge it, then finish. */
+  private startInterrupt(): void {
+    const s = this.seq!;
+    const h = this.host;
+    const d = this.def;
+    s.hold = true;
+    this.stats.interrupts++;
+    const lane = h.player.lane;
+    const pick = this.rng.int(0, this.phase >= 1 ? 3 : 2);
+    let rows: Row[];
+    let what: string;
+    if (pick === 0) {
+      rows = [{ at: 0, lanes: [0, 1, 2], kind: 'shock' }];
+      what = 'JUMP';
+    } else if (pick === 1) {
+      rows = [{ at: 0, lanes: [0, 1, 2], kind: 'laser' }];
+      what = 'SLIDE';
+    } else if (pick === 2) {
+      const free = this.rng.pick([0, 1, 2].filter((l) => Math.abs(l - lane) === 1));
+      rows = [{ at: 0, lanes: [0, 1, 2].filter((l) => l !== free), kind: 'corruptBlock', depth: 3 }];
+      what = 'DODGE';
+    } else {
+      // Two in a row: jump, then slide.
+      rows = [
+        { at: 0, lanes: [0, 1, 2], kind: 'shock' },
+        { at: 0.9, lanes: [0, 1, 2], kind: 'laser' },
+      ];
+      what = 'JUMP, SLIDE';
+    }
+    const pool = d.phases[0].attacks;
+    const def: AttackDef = { ...d.attacks[this.rng.pick(pool)], rows: () => rows, heavy: false, reverse: false, fx: undefined };
+    const lead = this.lead;
+    const tele = Math.max(0.45, this.tele);
+    const first = 0.2 + tele + lead;
+    const live: LiveRow[] = rows.map((r) => ({ ...r, arriveAt: first + r.at, spawnAt: first + r.at - lead, teleAt: first + r.at - lead - tele, dist: 0, shown: false, spawned: false }));
+    this.planCues(live, false);
+    const speed = Math.max(8, h.speed());
+    const clearAt = live.reduce((m, r) => Math.max(m, r.arriveAt + (r.depth ?? 1.5) / speed), 0) + 0.25;
+    this.attack = { id: 'interrupt', def, rows: live, t: 0, firstSpawn: first - lead, clearAt, end: clearAt + 0.2, hitsAtStart: h.hits(), judged: false, interrupt: true };
+    h.hud.combatHold(`⚠ INCOMING · ${what}!`);
+    h.post.flashScreen(d.color, 0.25);
+    h.cam.shake(0.35);
+    audio.play('bossTelegraph');
+    audio.play('bossRoar');
+    this.roarT = 1;
+  }
+
+  private endInterrupt(a: LiveAttack): void {
+    const s = this.seq;
+    if (!s || s.state !== 'live') return;
+    const h = this.host;
+    if (h.hits() !== a.hitsAtStart) {
+      s.state = 'fail';
+      s.failReason = 'hit';
+      this.resolveSeq(false);
+      return;
+    }
+    // Dodged it: the combo carries on with a bit of time back.
+    this.stats.interruptsDodged++;
+    s.hold = false;
+    s.t = Math.min(s.t, SEQ_GRACE + s.window * 0.4);
+    h.hud.combatHold(null);
+    h.hud.combatFeedback('DODGED!', 'FINISH THE COMBO', 'cyan');
+    audio.play('nearMiss');
+    this.meter = Math.min(1, this.meter + 0.08);
+    this.meta();
   }
 
   private resolveSeq(ok: boolean): void {
@@ -695,7 +788,8 @@ export class BossDirector {
       if (s.failReason === 'slow') this.stats.slow++;
       this.combo = 0;
       if (s.kind === 'special') this.meter = 0.5;
-      h.hud.combatFeedback('MISS', s.failReason === 'slow' ? 'TOO SLOW · IT STRIKES BACK' : 'WRONG MOVE · IT STRIKES BACK', 'red');
+      h.hud.combatFeedback(s.failReason === 'hit' ? 'INTERRUPTED' : 'MISS', s.failReason === 'slow' ? 'TOO SLOW · IT STRIKES BACK' : s.failReason === 'hit' ? 'COMBO BROKEN · DODGE ITS SWINGS' : 'WRONG MOVE · IT STRIKES BACK', 'red');
+      h.hud.combatHold(null);
       audio.play('seqMiss');
       h.post.flashScreen('#ff2a4a', 0.25);
       h.cam.shake(0.35);
@@ -837,15 +931,14 @@ export class BossDirector {
     }
     if (this.seqHideT > 0) {
       this.seqHideT -= dt;
-      if (this.seqHideT <= 0 && !this.seq) {
-        h.hud.combatSeq(null);
-        const n = this.nextPart;
-        if (n && this.cineT <= 0) {
-          this.nextPart = null;
-          if (n.phase === this.phase) this.openSeq(n.kind, n.part);
-          else this.cooldown = this.gap;
-        }
-      }
+      if (this.seqHideT <= 0 && !this.seq) h.hud.combatSeq(null);
+    }
+    // Next weak point, once the last strike (and any cinematic) has played out.
+    const n = this.nextPart;
+    if (n && !this.seq && this.seqHideT <= 0 && this.cineT <= 0) {
+      this.nextPart = null;
+      if (n.phase === this.phase) this.openSeq(n.kind, n.part);
+      else this.cooldown = this.gap;
     }
     if (this.cineT > 0) {
       const u0 = 1 - this.cineT / this.cineLen;
